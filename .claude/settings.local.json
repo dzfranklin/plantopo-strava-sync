@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tree:*)",
+      "Bash(go get:*)",
+      "Bash(go mod:*)",
+      "Bash(go build:*)",
+      "Bash(chmod:*)",
+      "Bash(./bin/server)",
+      "Bash(curl:*)",
+      "Bash(source .env)",
+      "Bash(set -a)",
+      "Bash(set +a)",
+      "Bash(timeout:*)",
+      "Bash(sqlite3:*)",
+      "Bash(go test:*)",
+      "WebFetch(domain:developers.strava.com)",
+      "Bash(mkdir:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
