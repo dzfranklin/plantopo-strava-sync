@@ -418,9 +418,9 @@ Write tests as you go
 - [x] Create database repository layer (athletes, activities, events CRUD)
 
 ### Phase 2: Strava API Integration
-- [ ] Implement Strava API client with rate limiting and token refresh
-- [ ] Add automatic token refresh logic (check expires_at before API calls)
-- [ ] Implement exponential backoff retry strategy for API errors
+- [x] Implement Strava API client with rate limiting and token refresh
+- [x] Add automatic token refresh logic (check expires_at before API calls)
+- [x] Implement exponential backoff retry strategy for API errors
 
 ### Phase 3: OAuth & Sync
 - [ ] Build OAuth callback handler (/connect endpoint with code exchange)
