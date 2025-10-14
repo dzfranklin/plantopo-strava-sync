@@ -15,6 +15,8 @@ The service consists of two components:
 - **HTTP Server**: Handles OAuth callbacks, webhook events, and internal API endpoints
 - **CLI Tool**: Manages webhook subscriptions (list, add, remove)
 
+Build binaries to bin directory in project root
+
 ## Data Model
 
 ### Athletes
@@ -405,13 +407,15 @@ Uses `log/slog` for structured logging.
 
 ## Implementation TODO
 
+Write tests as you go
+
 ### Phase 1: Foundation
 - [x] Set up core project structure (Go modules, directory layout)
-- [ ] Create database schema with athletes, activities, and webhook_events tables
-- [ ] Add database indexes (athlete_id, activity_id, start_date, has_details)
-- [ ] Implement configuration management (environment variables, .env loading)
-- [ ] Set up structured logging with slog (JSON format, log levels)
-- [ ] Create database repository layer (athletes, activities, events CRUD)
+- [x] Create database schema with athletes, activities, and webhook_events tables
+- [x] Add database indexes (athlete_id, activity_id, start_date, has_details)
+- [x] Implement configuration management (environment variables, .env loading)
+- [x] Set up structured logging with slog (JSON format, log levels)
+- [x] Create database repository layer (athletes, activities, events CRUD)
 
 ### Phase 2: Strava API Integration
 - [ ] Implement Strava API client with rate limiting and token refresh

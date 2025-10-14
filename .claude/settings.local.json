@@ -15,7 +15,8 @@
       "Bash(sqlite3:*)",
       "Bash(go test:*)",
       "WebFetch(domain:developers.strava.com)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
