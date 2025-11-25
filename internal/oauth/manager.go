@@ -135,19 +135,12 @@ func (m *Manager) HandleCallback(code, state string) (int64, error) {
 
 	m.logger.Info("Inserted athlete_connected event", "athlete_id", athleteID, "event_id", eventID)
 
-	// Enqueue special "sync_all" webhook to trigger historical activity sync
-	syncWebhook := map[string]interface{}{
-		"object_type": "sync_all",
-		"owner_id":    athleteID,
-		"event_time":  time.Now().Unix(),
-	}
-
-	syncData, _ := json.Marshal(syncWebhook)
-	if _, err := m.db.EnqueueWebhook(json.RawMessage(syncData)); err != nil {
-		m.logger.Error("Failed to enqueue sync_all webhook", "error", err, "athlete_id", athleteID)
+	// Enqueue sync job to trigger historical activity sync
+	if _, err := m.db.EnqueueSyncJob(athleteID, "sync_all_activities"); err != nil {
+		m.logger.Error("Failed to enqueue sync job", "error", err, "athlete_id", athleteID)
 		// Don't fail the OAuth flow if sync enqueueing fails
 	} else {
-		m.logger.Info("Enqueued sync_all webhook", "athlete_id", athleteID)
+		m.logger.Info("Enqueued sync job", "athlete_id", athleteID, "job_type", "sync_all_activities")
 	}
 
 	return athleteID, nil

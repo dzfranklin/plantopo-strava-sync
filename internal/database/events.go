@@ -130,14 +130,14 @@ func (d *DB) GetEvents(cursor int64, limit int) ([]*Event, error) {
 	return events, nil
 }
 
-// InsertActivityEvent inserts an activity event as type "webhook"
-// aspectType: "create", "update", "delete", "sync", or "deauthorize"
-// activityID: optional activity ID (nil for deauthorization events)
-// webhookEventData: optional raw webhook event data (nil for sync events)
-func (d *DB) InsertActivityEvent(athleteID int64, activityID *int64, aspectType string, activityData, webhookEventData json.RawMessage) (int64, error) {
-	// For sync events without webhook data, create a minimal event structure
-	if webhookEventData == nil && activityID != nil {
-		webhookEventData = json.RawMessage(fmt.Sprintf(`{"aspect_type":"%s","object_type":"activity","object_id":%d,"owner_id":%d}`, aspectType, *activityID, athleteID))
+// InsertActivityEvent inserts a webhook event (activity or athlete webhooks from Strava)
+// This is only for REAL Strava webhook events
+// activityID: activity ID from webhook (nil for athlete deauthorization events)
+// activityData: full activity details from Strava API (nil for delete/deauth events)
+// webhookEventData: raw webhook event data from Strava (must not be nil)
+func (d *DB) InsertActivityEvent(athleteID int64, activityID *int64, activityData, webhookEventData json.RawMessage) (int64, error) {
+	if webhookEventData == nil {
+		return 0, fmt.Errorf("webhookEventData is required for webhook events")
 	}
 
 	query := `

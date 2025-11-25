@@ -25,10 +25,30 @@ CREATE TABLE IF NOT EXISTS webhook_queue (
 -- Index for efficient retry scheduling and claiming
 CREATE INDEX IF NOT EXISTS idx_webhook_queue_ready ON webhook_queue(next_retry_at, processing_started_at);
 
+-- Sync jobs queue for background sync operations
+-- Separate from webhook_queue to avoid mixing real webhooks with synthetic sync jobs
+CREATE TABLE IF NOT EXISTS sync_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    athlete_id INTEGER NOT NULL,
+    job_type TEXT NOT NULL DEFAULT 'sync_all_activities', -- Job type for future extensibility
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_retry_at INTEGER, -- Unix timestamp, NULL = process immediately
+    processing_started_at INTEGER, -- Unix timestamp, NULL = not currently processing
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    FOREIGN KEY (athlete_id) REFERENCES athletes(athlete_id) ON DELETE CASCADE
+);
+
+-- Index for efficient retry scheduling and claiming
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_ready ON sync_jobs(next_retry_at, processing_started_at);
+
+-- Index for athlete lookups
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_athlete_id ON sync_jobs(athlete_id);
+
 -- Events table stores the event stream
 -- Supports event types:
 --   1. athlete_connected: When an athlete authorizes the app
---   2. webhook: Activity events from Strava webhooks (create/update/delete) or sync
+--   2. webhook: Activity events from Strava webhooks (create/update/delete)
 CREATE TABLE IF NOT EXISTS events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type TEXT NOT NULL CHECK(event_type IN ('athlete_connected', 'webhook')),

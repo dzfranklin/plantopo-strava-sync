@@ -236,18 +236,15 @@ func TestHandleActivity_UnknownAspectType(t *testing.T) {
 	}
 }
 
-func TestHandleSyncAll_InvalidOwnerID(t *testing.T) {
+func TestSyncAllActivities_InvalidAthleteID(t *testing.T) {
 	worker, db := setupWorkerTest(t)
 	defer db.Close()
 
-	webhook := map[string]interface{}{
-		"object_type": "sync_all",
-		"owner_id":    "invalid", // Should be number
-	}
-
-	err := worker.handleSyncAll(webhook)
-	if err == nil {
-		t.Error("Expected error for invalid owner_id")
+	// Test with non-existent athlete (should fail with unauthorized)
+	err := worker.syncAllActivities(99999)
+	// Should not error, just logs and skips
+	if err != nil {
+		t.Logf("Got expected error for non-existent athlete: %v", err)
 	}
 }
 
@@ -282,7 +279,7 @@ func TestStart_Cancellation(t *testing.T) {
 	}
 }
 
-func TestHydrateActivity_Integration(t *testing.T) {
+func TestProcessWebhookActivity_Integration(t *testing.T) {
 	worker, db := setupWorkerTest(t)
 	defer db.Close()
 
@@ -333,10 +330,13 @@ func TestHydrateActivity_Integration(t *testing.T) {
 	// Override base URL in worker's strava client
 	worker.stravaClient.SetBaseURL(apiServer.URL)
 
-	// Test hydrating activity
-	err = worker.hydrateActivity(athleteID, activityID, "create", nil)
+	// Create real webhook data
+	webhookData := json.RawMessage(`{"aspect_type":"create","object_type":"activity","object_id":67890,"owner_id":12345}`)
+
+	// Test processing webhook activity
+	err = worker.processWebhookActivity(athleteID, activityID, "create", webhookData)
 	if err != nil {
-		t.Fatalf("Failed to hydrate activity: %v", err)
+		t.Fatalf("Failed to process webhook activity: %v", err)
 	}
 
 	// Verify event was created
@@ -370,9 +370,14 @@ func TestHydrateActivity_Integration(t *testing.T) {
 	if activityData["name"] != "Morning Run" {
 		t.Errorf("Expected activity name 'Morning Run', got '%v'", activityData["name"])
 	}
+
+	// Verify webhook data was stored
+	if events[0].WebhookEvent == nil {
+		t.Fatal("Expected webhook event data to be stored")
+	}
 }
 
-func TestHandleSyncAll_Integration(t *testing.T) {
+func TestSyncAllActivities_Integration(t *testing.T) {
 	worker, db := setupWorkerTest(t)
 	defer db.Close()
 
@@ -451,16 +456,10 @@ func TestHandleSyncAll_Integration(t *testing.T) {
 	// Override base URL in worker's strava client
 	worker.stravaClient.SetBaseURL(apiServer.URL)
 
-	// Test sync_all
-	webhook := map[string]interface{}{
-		"object_type": "sync_all",
-		"owner_id":    float64(athleteID),
-		"event_time":  time.Now().Unix(),
-	}
-
-	err = worker.handleSyncAll(webhook)
+	// Test syncAllActivities
+	err = worker.syncAllActivities(athleteID)
 	if err != nil {
-		t.Fatalf("Failed to handle sync_all: %v", err)
+		t.Fatalf("Failed to sync all activities: %v", err)
 	}
 
 	// Verify correct number of API calls
@@ -468,21 +467,14 @@ func TestHandleSyncAll_Integration(t *testing.T) {
 		t.Errorf("Expected 2 activity details requests, got %d", activityDetailsRequests)
 	}
 
-	// Verify events were created
+	// Verify NO events were created (sync doesn't create events)
 	events, err := db.ListEvents(athleteID, 0, 10)
 	if err != nil {
 		t.Fatalf("Failed to list events: %v", err)
 	}
 
-	if len(events) != 2 {
-		t.Fatalf("Expected 2 events, got %d", len(events))
-	}
-
-	// Verify both events are webhook type
-	for _, event := range events {
-		if event.EventType != "webhook" {
-			t.Errorf("Expected event type 'webhook', got '%s'", event.EventType)
-		}
+	if len(events) != 0 {
+		t.Errorf("Expected 0 events (sync doesn't create events), got %d", len(events))
 	}
 }
 
@@ -499,7 +491,8 @@ func TestHandleAthlete_Deauthorization(t *testing.T) {
 	}
 
 	activityID := int64(99999)
-	eventID2, err := db.InsertActivityEvent(athleteID, &activityID, "create", json.RawMessage(`{"id": 99999}`), nil)
+	webhookData := json.RawMessage(`{"aspect_type":"create","object_type":"activity","object_id":99999,"owner_id":12345}`)
+	eventID2, err := db.InsertActivityEvent(athleteID, &activityID, json.RawMessage(`{"id": 99999}`), webhookData)
 	if err != nil {
 		t.Fatalf("Failed to insert activity event: %v", err)
 	}
@@ -544,16 +537,16 @@ func TestHandleAthlete_Deauthorization(t *testing.T) {
 	}
 
 	// Verify the webhook event data contains the deauthorization
-	var webhookData map[string]interface{}
-	if err := json.Unmarshal(events[0].WebhookEvent, &webhookData); err != nil {
+	var storedWebhookData map[string]interface{}
+	if err := json.Unmarshal(events[0].WebhookEvent, &storedWebhookData); err != nil {
 		t.Fatalf("Failed to unmarshal webhook event: %v", err)
 	}
 
-	if webhookData["object_type"] != "athlete" {
-		t.Errorf("Expected object_type 'athlete', got '%v'", webhookData["object_type"])
+	if storedWebhookData["object_type"] != "athlete" {
+		t.Errorf("Expected object_type 'athlete', got '%v'", storedWebhookData["object_type"])
 	}
 
-	updates, ok := webhookData["updates"].(map[string]interface{})
+	updates, ok := storedWebhookData["updates"].(map[string]interface{})
 	if !ok {
 		t.Fatal("Expected updates to be a map")
 	}

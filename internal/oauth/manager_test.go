@@ -242,14 +242,14 @@ func TestHandleCallback_Integration(t *testing.T) {
 		t.Error("Expected athlete_connected event to be created")
 	}
 
-	// Verify sync_all webhook was enqueued
-	queueLength, err := db.GetQueueLength()
+	// Verify sync job was enqueued
+	syncJobQueueLength, err := db.GetSyncJobQueueLength()
 	if err != nil {
-		t.Fatalf("Failed to get queue length: %v", err)
+		t.Fatalf("Failed to get sync job queue length: %v", err)
 	}
 
-	if queueLength != 1 {
-		t.Errorf("Expected 1 item in queue (sync_all), got %d", queueLength)
+	if syncJobQueueLength != 1 {
+		t.Errorf("Expected 1 sync job in queue, got %d", syncJobQueueLength)
 	}
 }
 
@@ -273,54 +273,47 @@ func TestGenerateRandomState(t *testing.T) {
 	}
 }
 
-func TestEnqueueSyncWebhook(t *testing.T) {
+func TestEnqueueSyncJob(t *testing.T) {
 	_, db := setupOAuthTest(t)
 	defer db.Close()
 
-	// Manually test enqueueing sync webhook
+	// Manually test enqueueing sync job
 	athleteID := int64(12345)
-	syncWebhook := map[string]interface{}{
-		"object_type": "sync_all",
-		"owner_id":    athleteID,
-		"event_time":  time.Now().Unix(),
-	}
 
-	syncData, err := json.Marshal(syncWebhook)
+	id, err := db.EnqueueSyncJob(athleteID, "sync_all_activities")
 	if err != nil {
-		t.Fatalf("Failed to marshal sync webhook: %v", err)
-	}
-
-	id, err := db.EnqueueWebhook(json.RawMessage(syncData))
-	if err != nil {
-		t.Fatalf("Failed to enqueue sync webhook: %v", err)
+		t.Fatalf("Failed to enqueue sync job: %v", err)
 	}
 
 	if id == 0 {
-		t.Error("Expected non-zero webhook ID")
+		t.Error("Expected non-zero sync job ID")
 	}
 
 	// Verify it's in the queue
-	length, err := db.GetQueueLength()
+	length, err := db.GetSyncJobQueueLength()
 	if err != nil {
-		t.Fatalf("Failed to get queue length: %v", err)
+		t.Fatalf("Failed to get sync job queue length: %v", err)
 	}
 
 	if length != 1 {
-		t.Errorf("Expected queue length 1, got %d", length)
+		t.Errorf("Expected sync job queue length 1, got %d", length)
 	}
 
-	// Verify the data
-	item, err := db.ClaimWebhook()
+	// Verify the data by claiming it
+	job, err := db.ClaimSyncJob()
 	if err != nil {
-		t.Fatalf("Failed to claim webhook: %v", err)
+		t.Fatalf("Failed to claim sync job: %v", err)
 	}
 
-	var webhook map[string]interface{}
-	if err := json.Unmarshal(item.Data, &webhook); err != nil {
-		t.Fatalf("Failed to unmarshal webhook: %v", err)
+	if job == nil {
+		t.Fatal("Expected to claim a sync job, got nil")
 	}
 
-	if webhook["object_type"] != "sync_all" {
-		t.Errorf("Expected object_type 'sync_all', got '%v'", webhook["object_type"])
+	if job.AthleteID != athleteID {
+		t.Errorf("Expected athlete ID %d, got %d", athleteID, job.AthleteID)
+	}
+
+	if job.JobType != "sync_all_activities" {
+		t.Errorf("Expected job type 'sync_all_activities', got '%s'", job.JobType)
 	}
 }

@@ -350,7 +350,8 @@ func TestDatabaseOperations(t *testing.T) {
 		activityID := int64(99999)
 		activity := json.RawMessage(`{"id": 99999, "name": "Morning Run"}`)
 
-		activityEventID, err := db.InsertActivityEvent(12345, &activityID, "create", activity, nil)
+		webhookData := json.RawMessage(`{"aspect_type":"create","object_type":"activity","object_id":99999,"owner_id":12345}`)
+		activityEventID, err := db.InsertActivityEvent(12345, &activityID, activity, webhookData)
 		if err != nil {
 			t.Fatalf("Failed to insert activity event: %v", err)
 		}
