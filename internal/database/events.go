@@ -17,14 +17,14 @@ const (
 
 // Event represents an event in the event stream
 type Event struct {
-	EventID        int64
-	EventType      EventType
-	AthleteID      int64
-	ActivityID     *int64           // Nullable
-	AthleteSummary json.RawMessage  // For athlete_connected events
-	Activity       json.RawMessage  // For webhook events (detailed activity)
-	WebhookEvent   json.RawMessage  // For webhook events (raw webhook data)
-	CreatedAt      time.Time
+	EventID        int64           `json:"event_id"`
+	EventType      EventType       `json:"event_type"`
+	AthleteID      int64           `json:"athlete_id"`
+	ActivityID     *int64          `json:"activity_id,omitempty"` // Nullable
+	AthleteSummary json.RawMessage `json:"athlete_summary,omitempty"` // For athlete_connected events
+	Activity       json.RawMessage `json:"activity,omitempty"` // For webhook events (detailed activity)
+	WebhookEvent   json.RawMessage `json:"event,omitempty"` // For webhook events (raw webhook data)
+	CreatedAt      time.Time       `json:"created_at"`
 }
 
 // InsertAthleteConnectedEvent inserts an athlete_connected event
@@ -80,6 +80,97 @@ func (d *DB) GetEvents(cursor int64, limit int) ([]*Event, error) {
 	`
 
 	rows, err := d.db.Query(query, cursor, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []*Event
+	for rows.Next() {
+		var event Event
+		var activityID sql.NullInt64
+		var athleteSummary, activity, webhookEvent sql.NullString
+		var createdAt int64
+
+		err := rows.Scan(
+			&event.EventID,
+			&event.EventType,
+			&event.AthleteID,
+			&activityID,
+			&athleteSummary,
+			&activity,
+			&webhookEvent,
+			&createdAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan event: %w", err)
+		}
+
+		if activityID.Valid {
+			event.ActivityID = &activityID.Int64
+		}
+		if athleteSummary.Valid {
+			event.AthleteSummary = json.RawMessage(athleteSummary.String)
+		}
+		if activity.Valid {
+			event.Activity = json.RawMessage(activity.String)
+		}
+		if webhookEvent.Valid {
+			event.WebhookEvent = json.RawMessage(webhookEvent.String)
+		}
+		event.CreatedAt = time.Unix(createdAt, 0)
+
+		events = append(events, &event)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating events: %w", err)
+	}
+
+	return events, nil
+}
+
+// InsertActivityEvent inserts an activity event as type "webhook"
+// aspectType: "create", "update", "delete", "sync", or "deauthorize"
+// activityID: optional activity ID (nil for deauthorization events)
+// webhookEventData: optional raw webhook event data (nil for sync events)
+func (d *DB) InsertActivityEvent(athleteID int64, activityID *int64, aspectType string, activityData, webhookEventData json.RawMessage) (int64, error) {
+	// For sync events without webhook data, create a minimal event structure
+	if webhookEventData == nil && activityID != nil {
+		webhookEventData = json.RawMessage(fmt.Sprintf(`{"aspect_type":"%s","object_type":"activity","object_id":%d,"owner_id":%d}`, aspectType, *activityID, athleteID))
+	}
+
+	query := `
+		INSERT INTO events (event_type, athlete_id, activity_id, activity, webhook_event)
+		VALUES (?, ?, ?, ?, ?)
+	`
+
+	result, err := d.db.Exec(query, "webhook", athleteID, activityID, activityData, webhookEventData)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert activity event: %w", err)
+	}
+
+	eventID, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get event_id: %w", err)
+	}
+
+	return eventID, nil
+}
+
+// ListEvents retrieves events for a specific athlete with cursor-based pagination
+// cursor: the last event_id seen (0 for first page)
+// limit: maximum number of events to return
+func (d *DB) ListEvents(athleteID int64, cursor int64, limit int) ([]*Event, error) {
+	query := `
+		SELECT event_id, event_type, athlete_id, activity_id, athlete_summary, activity, webhook_event, created_at
+		FROM events
+		WHERE athlete_id = ? AND event_id > ?
+		ORDER BY event_id ASC
+		LIMIT ?
+	`
+
+	rows, err := d.db.Query(query, athleteID, cursor, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query events: %w", err)
 	}

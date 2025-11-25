@@ -15,13 +15,20 @@ CREATE TABLE IF NOT EXISTS athletes (
 -- Events do not appear in the events table until they have been hydrated
 CREATE TABLE IF NOT EXISTS webhook_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    data TEXT NOT NULL -- JSON blob containing webhook event data
+    data TEXT NOT NULL, -- JSON blob containing webhook event data
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_retry_at INTEGER, -- Unix timestamp, NULL = process immediately
+    processing_started_at INTEGER -- Unix timestamp, NULL = not currently processing
 );
 
+-- Index for efficient retry scheduling and claiming
+CREATE INDEX IF NOT EXISTS idx_webhook_queue_ready ON webhook_queue(next_retry_at, processing_started_at);
+
 -- Events table stores the event stream
--- Supports two event types:
+-- Supports event types:
 --   1. athlete_connected: When an athlete authorizes the app
---   2. webhook: Activity updates from Strava webhooks
+--   2. webhook: Activity events from Strava webhooks (create/update/delete) or sync
 CREATE TABLE IF NOT EXISTS events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type TEXT NOT NULL CHECK(event_type IN ('athlete_connected', 'webhook')),
@@ -35,9 +42,7 @@ CREATE TABLE IF NOT EXISTS events (
     activity TEXT, -- JSON: For webhook events (detailed activity from API)
     webhook_event TEXT, -- JSON: For webhook events (raw webhook data)
 
-    created_at INTEGER NOT NULL DEFAULT (unixepoch()), -- Unix timestamp
-
-    FOREIGN KEY (athlete_id) REFERENCES athletes(athlete_id) ON DELETE CASCADE
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()) -- Unix timestamp
 );
 
 -- Index for cursor-based pagination (events are ordered by event_id)

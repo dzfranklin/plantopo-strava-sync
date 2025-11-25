@@ -83,7 +83,8 @@ func (d *DB) GetAthlete(athleteID int64) (*Athlete, error) {
 	return &athlete, nil
 }
 
-// DeleteAthlete deletes an athlete and all their events (due to CASCADE)
+// DeleteAthlete deletes an athlete record
+// Note: This does not delete their events - use DeleteAthleteEvents separately if needed
 func (d *DB) DeleteAthlete(athleteID int64) error {
 	query := `DELETE FROM athletes WHERE athlete_id = ?`
 
