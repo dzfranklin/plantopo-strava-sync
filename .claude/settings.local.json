@@ -16,7 +16,8 @@
       "Bash(go test:*)",
       "WebFetch(domain:developers.strava.com)",
       "Bash(mkdir:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(./plantopo-strava-sync:*)"
     ],
     "deny": [],
     "ask": []
