@@ -1,27 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(tree:*)",
-      "Bash(go get:*)",
-      "Bash(go mod:*)",
-      "Bash(go build:*)",
-      "Bash(chmod:*)",
-      "Bash(curl:*)",
-      "Bash(source .env)",
-      "Bash(set -a)",
-      "Bash(set +a)",
-      "Bash(timeout:*)",
-      "Bash(sqlite3:*)",
-      "Bash(go test:*)",
-      "WebFetch(domain:developers.strava.com)",
-      "Bash(mkdir:*)",
-      "Bash(cat:*)",
-      "Bash(./plantopo-strava-sync:*)",
-      "Bash(find:*)",
-      "Bash(kill:*)",
-      "Bash(pkill:*)",
-      "Bash(go *)",
-      "Bash(git *)"
+      "Bash(unset:*)"
     ],
     "deny": [],
     "ask": []

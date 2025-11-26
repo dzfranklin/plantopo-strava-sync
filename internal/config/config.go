@@ -42,7 +42,7 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		// Optional values with defaults
-		Host:         getEnv("HOST", "localhost"),
+		Host:         getEnv("HOST", "127.0.0.1"),
 		Port:         getEnvInt("PORT", 4101),
 		DatabasePath: getEnv("DATABASE_PATH", "./data.db"),
 		LogLevel:     getEnv("LOG_LEVEL", "info"),
@@ -50,7 +50,7 @@ func Load() (*Config, error) {
 		// Metrics defaults
 		MetricsEnabled: getEnvBool("METRICS_ENABLED", true),
 		MetricsHost:    getEnv("METRICS_HOST", "127.0.0.1"),
-		MetricsPort:    getEnvInt("METRICS_PORT", 9090),
+		MetricsPort:    getEnvInt("METRICS_PORT", 4102),
 
 		// Initialize Strava clients map
 		StravaClients: make(map[string]*StravaClientConfig),
@@ -73,23 +73,30 @@ func Load() (*Config, error) {
 		missingVars = append(missingVars, "STRAVA_PRIMARY_VERIFY_TOKEN")
 	}
 
-	// Load secondary client
+	// Load secondary client (optional)
 	secondaryClientID := os.Getenv("STRAVA_SECONDARY_CLIENT_ID")
-	if secondaryClientID == "" {
-		missingVars = append(missingVars, "STRAVA_SECONDARY_CLIENT_ID")
-	}
 	secondaryClientSecret := os.Getenv("STRAVA_SECONDARY_CLIENT_SECRET")
-	if secondaryClientSecret == "" {
-		missingVars = append(missingVars, "STRAVA_SECONDARY_CLIENT_SECRET")
-	}
 	secondaryVerifyToken := os.Getenv("STRAVA_SECONDARY_VERIFY_TOKEN")
-	if secondaryVerifyToken == "" {
-		missingVars = append(missingVars, "STRAVA_SECONDARY_VERIFY_TOKEN")
-	}
+
+	// Check if any secondary variable is set
+	hasAnySecondary := secondaryClientID != "" || secondaryClientSecret != "" || secondaryVerifyToken != ""
 
 	cfg.InternalAPIKey = os.Getenv("INTERNAL_API_KEY")
 	if cfg.InternalAPIKey == "" {
 		missingVars = append(missingVars, "INTERNAL_API_KEY")
+	}
+
+	// If any secondary variable is set, all must be set
+	if hasAnySecondary {
+		if secondaryClientID == "" {
+			missingVars = append(missingVars, "STRAVA_SECONDARY_CLIENT_ID")
+		}
+		if secondaryClientSecret == "" {
+			missingVars = append(missingVars, "STRAVA_SECONDARY_CLIENT_SECRET")
+		}
+		if secondaryVerifyToken == "" {
+			missingVars = append(missingVars, "STRAVA_SECONDARY_VERIFY_TOKEN")
+		}
 	}
 
 	if len(missingVars) > 0 {
@@ -102,10 +109,14 @@ func Load() (*Config, error) {
 		ClientSecret: primaryClientSecret,
 		VerifyToken:  primaryVerifyToken,
 	}
-	cfg.StravaClients["secondary"] = &StravaClientConfig{
-		ClientID:     secondaryClientID,
-		ClientSecret: secondaryClientSecret,
-		VerifyToken:  secondaryVerifyToken,
+
+	// Only add secondary client if all variables are present
+	if hasAnySecondary && secondaryClientID != "" && secondaryClientSecret != "" && secondaryVerifyToken != "" {
+		cfg.StravaClients["secondary"] = &StravaClientConfig{
+			ClientID:     secondaryClientID,
+			ClientSecret: secondaryClientSecret,
+			VerifyToken:  secondaryVerifyToken,
+		}
 	}
 
 	return cfg, nil
