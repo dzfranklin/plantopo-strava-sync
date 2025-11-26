@@ -53,7 +53,9 @@ func (h *EventsHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse query parameters
-	cursorStr := r.URL.Query().Get("cursor")
+	query := r.URL.Query()
+
+	cursorStr := query.Get("cursor")
 	cursor := int64(0)
 	if cursorStr != "" {
 		var err error
@@ -64,7 +66,7 @@ func (h *EventsHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	limitStr := r.URL.Query().Get("limit")
+	limitStr := query.Get("limit")
 	limit := 100
 	if limitStr != "" {
 		var err error
@@ -81,7 +83,9 @@ func (h *EventsHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Parse long_poll parameter (default: false)
 	longPoll := false
-	if longPollStr := r.URL.Query().Get("long_poll"); longPollStr != "" {
+	if query.Has("long_poll") && query.Get("long_poll") == "" {
+		longPoll = true
+	} else if longPollStr := query.Get("long_poll"); longPollStr != "" {
 		longPoll = longPollStr == "true" || longPollStr == "1"
 	}
 
