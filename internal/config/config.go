@@ -15,6 +15,9 @@ type StravaClientConfig struct {
 
 // Config holds all application configuration
 type Config struct {
+	// Publicly accessible domain pointing to server
+	Domain string
+
 	// Server configuration
 	Host string
 	Port int
@@ -58,6 +61,12 @@ func Load() (*Config, error) {
 
 	// Required values
 	var missingVars []string
+
+	domain := os.Getenv("DOMAIN")
+	if domain == "" {
+		missingVars = append(missingVars, "DOMAIN")
+	}
+	cfg.Domain = domain
 
 	// Load primary client
 	primaryClientID := os.Getenv("STRAVA_PRIMARY_CLIENT_ID")

@@ -141,11 +141,3 @@ func (h *WebhookHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("Webhook enqueued successfully", "client_id", clientID)
 }
-
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

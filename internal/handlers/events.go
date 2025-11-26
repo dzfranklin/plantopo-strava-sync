@@ -46,7 +46,7 @@ func (h *EventsHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Verify authentication - check Authorization header
 	authHeader := r.Header.Get("Authorization")
-	if authHeader != h.config.InternalAPIKey {
+	if authHeader != "Bearer "+h.config.InternalAPIKey {
 		h.logger.Warn("Unauthorized events request", "has_auth", authHeader != "")
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return

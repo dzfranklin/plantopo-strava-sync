@@ -28,13 +28,13 @@ func main() {
 	// Define CLI flags
 	listSubscriptions := flag.Bool("list-strava-subscriptions", false, "List all Strava webhook subscriptions")
 	deleteSubscription := flag.String("delete-strava-subscription", "", "Delete a Strava webhook subscription by ID")
-	createSubscription := flag.String("create-strava-subscription", "", "Create a Strava webhook subscription with domain (e.g., example.com)")
+	createSubscription := flag.Bool("create-strava-subscription", false, "Create a Strava webhook subscription for configuration")
 	clientID := flag.String("client-id", "", "Strava client identifier (primary or secondary)")
 
 	flag.Parse()
 
 	// Check if any CLI command was requested
-	if *listSubscriptions || *deleteSubscription != "" || *createSubscription != "" {
+	if *listSubscriptions || *deleteSubscription != "" || *createSubscription {
 		runCLI(*listSubscriptions, *deleteSubscription, *createSubscription, *clientID)
 		return
 	}
@@ -43,7 +43,7 @@ func main() {
 	runServer()
 }
 
-func runCLI(listSubs bool, deleteSub, createSub, clientID string) {
+func runCLI(listSubs bool, deleteSub string, createSub bool, clientID string) {
 	// Disable structured logging for CLI
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelError, // Only show errors
@@ -86,8 +86,8 @@ func runCLI(listSubs bool, deleteSub, createSub, clientID string) {
 		handleListSubscriptions(client, clientID)
 	case deleteSub != "":
 		handleDeleteSubscription(client, deleteSub, clientID)
-	case createSub != "":
-		handleCreateSubscription(client, cfg, createSub, clientID)
+	case createSub:
+		handleCreateSubscription(client, cfg, clientID)
 	}
 }
 
@@ -138,7 +138,7 @@ func handleDeleteSubscription(client *strava.Client, idStr, clientID string) {
 	fmt.Println("✓ Subscription deleted successfully!")
 }
 
-func handleCreateSubscription(client *strava.Client, cfg *config.Config, domain, clientID string) {
+func handleCreateSubscription(client *strava.Client, cfg *config.Config, clientID string) {
 	// Get client config for verify token
 	clientConfig, err := cfg.GetClient(clientID)
 	if err != nil {
@@ -147,7 +147,7 @@ func handleCreateSubscription(client *strava.Client, cfg *config.Config, domain,
 	}
 
 	// Build callback URL with client_id query parameter
-	callbackURL := fmt.Sprintf("https://%s/webhook-callback?client_id=%s", domain, clientID)
+	callbackURL := fmt.Sprintf("https://%s/webhook-callback?client_id=%s", cfg.Domain, clientID)
 
 	fmt.Printf("Creating webhook subscription...\n")
 	fmt.Printf("Client: %s\n", clientID)
@@ -160,13 +160,6 @@ func handleCreateSubscription(client *strava.Client, cfg *config.Config, domain,
 		if httpErr, ok := err.(*strava.HTTPError); ok {
 			fmt.Fprintf(os.Stderr, "Error: Subscription creation failed (HTTP %d)\n", httpErr.StatusCode)
 			fmt.Fprintf(os.Stderr, "Response: %s\n", httpErr.Body)
-
-			if httpErr.StatusCode == 400 {
-				fmt.Fprintln(os.Stderr, "\nPossible issues:")
-				fmt.Fprintln(os.Stderr, "- A subscription already exists for this application")
-				fmt.Fprintln(os.Stderr, "- The callback URL is not accessible from Strava")
-				fmt.Fprintln(os.Stderr, "- The verify token does not match")
-			}
 		} else {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
@@ -209,6 +202,12 @@ func runServer() {
 		"port", cfg.Port,
 		"database", cfg.DatabasePath,
 		"log_level", cfg.LogLevel)
+
+	cfgClientLogMsg := "Configured strava clients: "
+	for name := range cfg.StravaClients {
+		cfgClientLogMsg += fmt.Sprintf("%s (%s), ", name, cfg.StravaClients[name].ClientID)
+	}
+	logger.Info(cfgClientLogMsg)
 
 	// Open database
 	db, err := database.Open(cfg.DatabasePath)

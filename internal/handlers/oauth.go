@@ -45,12 +45,7 @@ func (h *OAuthHandler) HandleAuthStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build redirect URI (same host/port as current request)
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	redirectURI := fmt.Sprintf("%s://%s/oauth-callback", scheme, r.Host)
+	redirectURI := fmt.Sprintf("https://%s/oauth-callback", h.config.Domain)
 
 	// Generate authorization URL with client ID
 	authURL, state, err := h.oauthManager.GenerateAuthURL(redirectURI, clientID)
