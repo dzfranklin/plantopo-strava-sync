@@ -43,12 +43,12 @@ fi
 
 # Upload binary
 echo "Uploading binary..."
-if ! scp -q ".deploy/$BINARY_NAME" "$SSH_HOST:$APP_DIR/"; then
+if ! scp -q ".deploy/$BINARY_NAME" "$SSH_HOST:$APP_DIR/$BINARY_NAME-next"; then
     echo "Error: Failed to upload binary" >&2
     exit 1
 fi
 
-ssh "$SSH_HOST" "chmod +x $APP_DIR/$BINARY_NAME"
+ssh "$SSH_HOST" "chmod +x $APP_DIR/$BINARY_NAME-next && mv $APP_DIR/$BINARY_NAME-next $APP_DIR/$BINARY_NAME"
 
 # Restart service
 echo "Restarting service..."
@@ -58,12 +58,13 @@ if ! ssh "$SSH_HOST" "sudo systemctl restart $SERVICE_NAME"; then
 fi
 
 # Wait and verify
-sleep 3
-if ! ssh "$SSH_HOST" "sudo systemctl is-active --quiet $SERVICE_NAME"; then
+sleep 5
+if ! ssh "$SSH_HOST" "systemctl is-active --quiet $SERVICE_NAME"; then
     echo "Error: Service is not running" >&2
     ssh "$SSH_HOST" "journalctl -u $SERVICE_NAME -n 20"
     exit 1
 fi
 
+ssh "$SSH_HOST" "systemctl status $SERVICE_NAME"
+
 echo "Deployment complete."
-echo "View logs: ssh $SSH_HOST sudo journalctl -u $SERVICE_NAME -f"
