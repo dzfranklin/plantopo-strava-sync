@@ -4,6 +4,7 @@
 *.so
 *.dylib
 /plantopo-strava-sync
+.deploy
 
 # Test binary
 *.test
