@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"plantopo-strava-sync/internal/metrics"
 )
 
 // EventType represents the type of event
@@ -71,6 +74,9 @@ func (d *DB) InsertWebhookEvent(athleteID int64, activityID *int64, activity, we
 // cursor: the last event_id seen (0 for first page)
 // limit: maximum number of events to return
 func (d *DB) GetEvents(cursor int64, limit int) ([]*Event, error) {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpGetEvents))
+	defer timer.ObserveDuration()
+
 	query := `
 		SELECT event_id, event_type, athlete_id, activity_id, athlete_summary, activity, webhook_event, created_at
 		FROM events
@@ -81,6 +87,7 @@ func (d *DB) GetEvents(cursor int64, limit int) ([]*Event, error) {
 
 	rows, err := d.db.Query(query, cursor, limit)
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpGetEvents).Inc()
 		return nil, fmt.Errorf("failed to query events: %w", err)
 	}
 	defer rows.Close()
@@ -136,6 +143,9 @@ func (d *DB) GetEvents(cursor int64, limit int) ([]*Event, error) {
 // activityData: full activity details from Strava API (nil for delete/deauth events)
 // webhookEventData: raw webhook event data from Strava (must not be nil)
 func (d *DB) InsertActivityEvent(athleteID int64, activityID *int64, activityData, webhookEventData json.RawMessage) (int64, error) {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpInsertActivityEvent))
+	defer timer.ObserveDuration()
+
 	if webhookEventData == nil {
 		return 0, fmt.Errorf("webhookEventData is required for webhook events")
 	}
@@ -147,11 +157,13 @@ func (d *DB) InsertActivityEvent(athleteID int64, activityID *int64, activityDat
 
 	result, err := d.db.Exec(query, "webhook", athleteID, activityID, activityData, webhookEventData)
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpInsertActivityEvent).Inc()
 		return 0, fmt.Errorf("failed to insert activity event: %w", err)
 	}
 
 	eventID, err := result.LastInsertId()
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpInsertActivityEvent).Inc()
 		return 0, fmt.Errorf("failed to get event_id: %w", err)
 	}
 
@@ -224,6 +236,9 @@ func (d *DB) ListEvents(athleteID int64, cursor int64, limit int) ([]*Event, err
 // DeleteAthleteEvents deletes all events for an athlete except the deauthorization event
 // This should be called when an athlete revokes access
 func (d *DB) DeleteAthleteEvents(athleteID int64, exceptEventID int64) error {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpDeleteAthleteEvents))
+	defer timer.ObserveDuration()
+
 	query := `
 		DELETE FROM events
 		WHERE athlete_id = ? AND event_id != ?
@@ -231,6 +246,7 @@ func (d *DB) DeleteAthleteEvents(athleteID int64, exceptEventID int64) error {
 
 	_, err := d.db.Exec(query, athleteID, exceptEventID)
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpDeleteAthleteEvents).Inc()
 		return fmt.Errorf("failed to delete athlete events: %w", err)
 	}
 

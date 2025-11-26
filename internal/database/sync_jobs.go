@@ -3,6 +3,9 @@ package database
 import (
 	"fmt"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"plantopo-strava-sync/internal/metrics"
 )
 
 // SyncJob represents a sync job awaiting processing
@@ -19,17 +22,25 @@ type SyncJob struct {
 
 // EnqueueSyncJob adds a sync job to the processing queue
 func (d *DB) EnqueueSyncJob(athleteID int64, jobType string) (int64, error) {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpEnqueueSyncJob))
+	defer timer.ObserveDuration()
+
 	query := `INSERT INTO sync_jobs (athlete_id, job_type) VALUES (?, ?)`
 
 	result, err := d.db.Exec(query, athleteID, jobType)
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpEnqueueSyncJob).Inc()
 		return 0, fmt.Errorf("failed to enqueue sync job: %w", err)
 	}
 
 	id, err := result.LastInsertId()
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpEnqueueSyncJob).Inc()
 		return 0, fmt.Errorf("failed to get sync job id: %w", err)
 	}
+
+	// Record successful enqueue
+	metrics.QueueEnqueueTotal.WithLabelValues(metrics.QueueTypeSyncJob).Inc()
 
 	return id, nil
 }
@@ -41,6 +52,9 @@ func (d *DB) EnqueueSyncJob(athleteID int64, jobType string) (int64, error) {
 // - processing_started_at is NULL or stale (older than StaleLockTimeout)
 // Uses UPDATE to atomically claim the job, preventing race conditions
 func (d *DB) ClaimSyncJob() (*SyncJob, error) {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpClaimSyncJob))
+	defer timer.ObserveDuration()
+
 	now := time.Now()
 	staleThreshold := now.Add(-StaleLockTimeout).Unix()
 
@@ -78,6 +92,7 @@ func (d *DB) ClaimSyncJob() (*SyncJob, error) {
 		if err.Error() == "sql: no rows in result set" {
 			return nil, nil // No items ready
 		}
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpClaimSyncJob).Inc()
 		return nil, fmt.Errorf("failed to claim sync job: %w", err)
 	}
 
@@ -94,10 +109,14 @@ func (d *DB) ClaimSyncJob() (*SyncJob, error) {
 
 // DeleteSyncJob deletes a processed sync job from the queue
 func (d *DB) DeleteSyncJob(id int64) error {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpDeleteSyncJob))
+	defer timer.ObserveDuration()
+
 	query := `DELETE FROM sync_jobs WHERE id = ?`
 
 	_, err := d.db.Exec(query, id)
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpDeleteSyncJob).Inc()
 		return fmt.Errorf("failed to delete sync job: %w", err)
 	}
 
@@ -108,6 +127,9 @@ func (d *DB) DeleteSyncJob(id int64) error {
 // Uses exponential backoff: 1min, 5min, 15min, 30min, 1hr, etc.
 // Returns true if the job was released, false if it was dropped due to max retries
 func (d *DB) ReleaseSyncJob(id int64, retryCount int, errMsg string) (bool, error) {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpReleaseSyncJob))
+	defer timer.ObserveDuration()
+
 	newRetryCount := retryCount + 1
 
 	// Drop job if it has exceeded max retries
@@ -139,6 +161,7 @@ func (d *DB) ReleaseSyncJob(id int64, retryCount int, errMsg string) (bool, erro
 
 	_, err := d.db.Exec(query, newRetryCount, errMsg, nextRetryAt.Unix(), id)
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpReleaseSyncJob).Inc()
 		return false, fmt.Errorf("failed to release sync job: %w", err)
 	}
 
@@ -177,6 +200,28 @@ func (d *DB) GetReadySyncJobQueueLength() (int, error) {
 	err := d.db.QueryRow(query, now.Unix(), staleThreshold).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get ready sync job queue length: %w", err)
+	}
+
+	return count, nil
+}
+
+// GetProcessingSyncJobQueueLength returns the number of sync jobs currently being processed
+// Items are considered processing if they have a recent processing_started_at timestamp
+func (d *DB) GetProcessingSyncJobQueueLength() (int, error) {
+	now := time.Now()
+	staleThreshold := now.Add(-StaleLockTimeout).Unix()
+
+	query := `
+		SELECT COUNT(*)
+		FROM sync_jobs
+		WHERE processing_started_at IS NOT NULL
+		  AND processing_started_at >= ?
+	`
+	var count int
+
+	err := d.db.QueryRow(query, staleThreshold).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get processing sync job queue length: %w", err)
 	}
 
 	return count, nil

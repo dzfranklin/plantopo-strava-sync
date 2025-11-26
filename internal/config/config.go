@@ -25,6 +25,11 @@ type Config struct {
 
 	// Logging configuration
 	LogLevel string
+
+	// Metrics configuration
+	MetricsEnabled bool
+	MetricsHost    string
+	MetricsPort    int
 }
 
 // Load reads configuration from environment variables
@@ -36,6 +41,11 @@ func Load() (*Config, error) {
 		Port:         getEnvInt("PORT", 4101),
 		DatabasePath: getEnv("DATABASE_PATH", "./data.db"),
 		LogLevel:     getEnv("LOG_LEVEL", "info"),
+
+		// Metrics defaults
+		MetricsEnabled: getEnvBool("METRICS_ENABLED", true),
+		MetricsHost:    getEnv("METRICS_HOST", "127.0.0.1"),
+		MetricsPort:    getEnvInt("METRICS_PORT", 9090),
 	}
 
 	// Required values
@@ -85,6 +95,21 @@ func getEnvInt(key string, defaultValue int) int {
 	}
 
 	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		return defaultValue
+	}
+
+	return value
+}
+
+// getEnvBool gets a boolean environment variable or returns a default value
+func getEnvBool(key string, defaultValue bool) bool {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+
+	value, err := strconv.ParseBool(valueStr)
 	if err != nil {
 		return defaultValue
 	}

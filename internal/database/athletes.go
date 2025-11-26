@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"plantopo-strava-sync/internal/metrics"
 )
 
 // Athlete represents an athlete's authentication data in the database
@@ -20,6 +23,9 @@ type Athlete struct {
 
 // UpsertAthlete inserts or updates an athlete's data
 func (d *DB) UpsertAthlete(athlete *Athlete) error {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpUpsertAthlete))
+	defer timer.ObserveDuration()
+
 	query := `
 		INSERT INTO athletes (athlete_id, access_token, refresh_token, token_expires_at, athlete_summary, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -42,6 +48,7 @@ func (d *DB) UpsertAthlete(athlete *Athlete) error {
 	)
 
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpUpsertAthlete).Inc()
 		return fmt.Errorf("failed to upsert athlete: %w", err)
 	}
 
@@ -50,6 +57,9 @@ func (d *DB) UpsertAthlete(athlete *Athlete) error {
 
 // GetAthlete retrieves an athlete by ID
 func (d *DB) GetAthlete(athleteID int64) (*Athlete, error) {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpGetAthlete))
+	defer timer.ObserveDuration()
+
 	query := `
 		SELECT athlete_id, access_token, refresh_token, token_expires_at, athlete_summary, created_at, updated_at
 		FROM athletes
@@ -73,6 +83,7 @@ func (d *DB) GetAthlete(athleteID int64) (*Athlete, error) {
 		return nil, nil // Athlete not found
 	}
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpGetAthlete).Inc()
 		return nil, fmt.Errorf("failed to get athlete: %w", err)
 	}
 

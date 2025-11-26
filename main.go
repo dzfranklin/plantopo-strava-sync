@@ -12,9 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"plantopo-strava-sync/internal/config"
 	"plantopo-strava-sync/internal/database"
 	"plantopo-strava-sync/internal/handlers"
+	"plantopo-strava-sync/internal/metrics"
+	"plantopo-strava-sync/internal/middleware"
 	"plantopo-strava-sync/internal/oauth"
 	"plantopo-strava-sync/internal/strava"
 	"plantopo-strava-sync/internal/worker"
@@ -206,11 +210,11 @@ func runServer() {
 	mux := http.NewServeMux()
 
 	// OAuth endpoints
-	mux.HandleFunc("/oauth-start", oauthHandler.HandleAuthStart)
-	mux.HandleFunc("/oauth-callback", oauthHandler.HandleCallback)
+	mux.Handle("/oauth-start", middleware.WrapHandler(metrics.EndpointOAuthStart, oauthHandler.HandleAuthStart))
+	mux.Handle("/oauth-callback", middleware.WrapHandler(metrics.EndpointOAuthCallback, oauthHandler.HandleCallback))
 
 	// Webhook endpoints
-	mux.HandleFunc("/webhook-callback", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/webhook-callback", middleware.WrapHandler(metrics.EndpointWebhook, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			// GET = verification
 			webhookHandler.HandleVerification(w, r)
@@ -220,16 +224,16 @@ func runServer() {
 		} else {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
+	}))
 
 	// Events API endpoint
-	mux.HandleFunc("/events", eventsHandler.HandleEvents)
+	mux.Handle("/events", middleware.WrapHandler(metrics.EndpointEvents, eventsHandler.HandleEvents))
 
 	// Health check endpoint
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/health", middleware.WrapHandler(metrics.EndpointHealth, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
-	})
+	}))
 
 	// Create HTTP server
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -253,6 +257,34 @@ func runServer() {
 		}
 	}()
 
+	// Start queue depth collector if metrics are enabled
+	if cfg.MetricsEnabled {
+		go func() {
+			logger.Info("Starting queue depth collector")
+			metrics.StartQueueDepthCollector(workerCtx, db, 15*time.Second)
+		}()
+	}
+
+	// Start metrics server if enabled
+	var metricsServer *http.Server
+	if cfg.MetricsEnabled {
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("/metrics", promhttp.Handler())
+
+		metricsAddr := fmt.Sprintf("%s:%d", cfg.MetricsHost, cfg.MetricsPort)
+		metricsServer = &http.Server{
+			Addr:    metricsAddr,
+			Handler: metricsMux,
+		}
+
+		go func() {
+			logger.Info("Metrics server listening", "addr", metricsAddr)
+			if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("Metrics server failed", "error", err)
+			}
+		}()
+	}
+
 	// Start HTTP server in background
 	go func() {
 		logger.Info("HTTP server listening", "addr", addr)
@@ -272,12 +304,18 @@ func runServer() {
 	// Stop worker
 	workerCancel()
 
-	// Shutdown HTTP server with timeout
+	// Shutdown HTTP servers with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown failed", "error", err)
+	}
+
+	if metricsServer != nil {
+		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("Metrics server shutdown failed", "error", err)
+		}
 	}
 
 	logger.Info("Server stopped")

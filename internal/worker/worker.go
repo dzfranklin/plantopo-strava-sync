@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"plantopo-strava-sync/internal/database"
+	"plantopo-strava-sync/internal/metrics"
 	"plantopo-strava-sync/internal/strava"
 )
 
@@ -32,6 +34,8 @@ func NewWorker(db *database.DB, stravaClient *strava.Client) *Worker {
 // Start begins processing both webhooks and sync jobs from their respective queues
 func (w *Worker) Start(ctx context.Context) error {
 	w.logger.Info("Starting worker (webhooks + sync jobs)")
+	metrics.WorkerActive.Set(1)
+	defer metrics.WorkerActive.Set(0)
 
 	for {
 		select {
@@ -49,6 +53,7 @@ func (w *Worker) Start(ctx context.Context) error {
 
 			if webhook != nil {
 				// Process the webhook
+				metrics.WorkerPollCyclesTotal.WithLabelValues(metrics.OutcomeWebhookFound).Inc()
 				w.processWebhook(webhook)
 				continue
 			}
@@ -63,11 +68,13 @@ func (w *Worker) Start(ctx context.Context) error {
 
 			if syncJob != nil {
 				// Process the sync job
+				metrics.WorkerPollCyclesTotal.WithLabelValues(metrics.OutcomeSyncJobFound).Inc()
 				w.processSyncJob(syncJob)
 				continue
 			}
 
 			// Nothing to process, wait before trying again
+			metrics.WorkerPollCyclesTotal.WithLabelValues(metrics.OutcomeIdle).Inc()
 			time.Sleep(w.pollInterval)
 		}
 	}
@@ -75,11 +82,15 @@ func (w *Worker) Start(ctx context.Context) error {
 
 // processWebhook handles a single webhook item
 func (w *Worker) processWebhook(item *database.WebhookQueueItem) {
+	start := time.Now()
 	w.logger.Info("Processing webhook", "id", item.ID, "retry_count", item.RetryCount)
 
 	var webhook map[string]interface{}
 	if err := json.Unmarshal(item.Data, &webhook); err != nil {
 		w.logger.Error("Failed to unmarshal webhook", "id", item.ID, "error", err)
+		duration := time.Since(start).Seconds()
+		metrics.QueueProcessingDuration.WithLabelValues(metrics.QueueTypeWebhook, metrics.ResultFailure).Observe(duration)
+		metrics.QueueDequeueTotal.WithLabelValues(metrics.QueueTypeWebhook, metrics.ResultRetry).Inc()
 		w.releaseWebhook(item.ID, item.RetryCount, fmt.Sprintf("invalid JSON: %v", err))
 		return
 	}
@@ -98,11 +109,18 @@ func (w *Worker) processWebhook(item *database.WebhookQueueItem) {
 		if err := w.db.DeleteWebhook(item.ID); err != nil {
 			w.logger.Error("Failed to delete unknown webhook", "id", item.ID, "error", err)
 		}
+		duration := time.Since(start).Seconds()
+		metrics.QueueProcessingDuration.WithLabelValues(metrics.QueueTypeWebhook, metrics.ResultSuccess).Observe(duration)
+		metrics.QueueDequeueTotal.WithLabelValues(metrics.QueueTypeWebhook, metrics.ResultDropped).Inc()
 		return
 	}
 
 	if err != nil {
 		w.logger.Error("Failed to process webhook", "id", item.ID, "error", err)
+		duration := time.Since(start).Seconds()
+		metrics.QueueProcessingDuration.WithLabelValues(metrics.QueueTypeWebhook, metrics.ResultFailure).Observe(duration)
+		metrics.QueueDequeueTotal.WithLabelValues(metrics.QueueTypeWebhook, metrics.ResultRetry).Inc()
+		metrics.QueueRetryTotal.WithLabelValues(metrics.QueueTypeWebhook, strconv.Itoa(item.RetryCount+1)).Inc()
 		w.releaseWebhook(item.ID, item.RetryCount, err.Error())
 		return
 	}
@@ -111,12 +129,16 @@ func (w *Worker) processWebhook(item *database.WebhookQueueItem) {
 	if err := w.db.DeleteWebhook(item.ID); err != nil {
 		w.logger.Error("Failed to delete completed webhook", "id", item.ID, "error", err)
 	} else {
+		duration := time.Since(start).Seconds()
+		metrics.QueueProcessingDuration.WithLabelValues(metrics.QueueTypeWebhook, metrics.ResultSuccess).Observe(duration)
+		metrics.QueueDequeueTotal.WithLabelValues(metrics.QueueTypeWebhook, metrics.ResultSuccess).Inc()
 		w.logger.Info("Webhook processed successfully", "id", item.ID)
 	}
 }
 
 // processSyncJob handles a single sync job
 func (w *Worker) processSyncJob(job *database.SyncJob) {
+	start := time.Now()
 	w.logger.Info("Processing sync job",
 		"id", job.ID,
 		"athlete_id", job.AthleteID,
@@ -133,11 +155,18 @@ func (w *Worker) processSyncJob(job *database.SyncJob) {
 		if err := w.db.DeleteSyncJob(job.ID); err != nil {
 			w.logger.Error("Failed to delete unknown sync job", "id", job.ID, "error", err)
 		}
+		duration := time.Since(start).Seconds()
+		metrics.QueueProcessingDuration.WithLabelValues(metrics.QueueTypeSyncJob, metrics.ResultSuccess).Observe(duration)
+		metrics.QueueDequeueTotal.WithLabelValues(metrics.QueueTypeSyncJob, metrics.ResultDropped).Inc()
 		return
 	}
 
 	if err != nil {
 		w.logger.Error("Failed to process sync job", "id", job.ID, "error", err)
+		duration := time.Since(start).Seconds()
+		metrics.QueueProcessingDuration.WithLabelValues(metrics.QueueTypeSyncJob, metrics.ResultFailure).Observe(duration)
+		metrics.QueueDequeueTotal.WithLabelValues(metrics.QueueTypeSyncJob, metrics.ResultRetry).Inc()
+		metrics.QueueRetryTotal.WithLabelValues(metrics.QueueTypeSyncJob, strconv.Itoa(job.RetryCount+1)).Inc()
 		w.releaseSyncJob(job.ID, job.RetryCount, err.Error())
 		return
 	}
@@ -146,6 +175,9 @@ func (w *Worker) processSyncJob(job *database.SyncJob) {
 	if err := w.db.DeleteSyncJob(job.ID); err != nil {
 		w.logger.Error("Failed to delete completed sync job", "id", job.ID, "error", err)
 	} else {
+		duration := time.Since(start).Seconds()
+		metrics.QueueProcessingDuration.WithLabelValues(metrics.QueueTypeSyncJob, metrics.ResultSuccess).Observe(duration)
+		metrics.QueueDequeueTotal.WithLabelValues(metrics.QueueTypeSyncJob, metrics.ResultSuccess).Inc()
 		w.logger.Info("Sync job processed successfully", "id", job.ID)
 	}
 }
@@ -205,6 +237,10 @@ func (w *Worker) syncAllActivities(athleteID int64) error {
 	w.logger.Info("Completed sync_all for athlete",
 		"athlete_id", athleteID,
 		"total_activities", totalActivities)
+
+	// Record business metrics
+	metrics.SyncJobsCompletedTotal.WithLabelValues("sync_all_activities").Inc()
+	metrics.SyncAllActivitiesCount.Observe(float64(totalActivities))
 
 	return nil
 }
@@ -319,6 +355,9 @@ func (w *Worker) handleAthlete(webhook map[string]interface{}) error {
 		"athlete_id", athleteID,
 		"except_event_id", eventID)
 
+	// Record business metric
+	metrics.WebhookEventsProcessedTotal.WithLabelValues("athlete", "deauthorization").Inc()
+
 	return nil
 }
 
@@ -354,6 +393,9 @@ func (w *Worker) processWebhookActivity(athleteID, activityID int64, aspectType 
 		"activity_id", activityID,
 		"aspect_type", aspectType,
 		"event_id", eventID)
+
+	// Record business metric
+	metrics.WebhookEventsProcessedTotal.WithLabelValues("activity", aspectType).Inc()
 
 	return nil
 }

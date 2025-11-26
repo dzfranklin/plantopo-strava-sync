@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+
+	"plantopo-strava-sync/internal/metrics"
 )
 
 // ActivitySummary represents a summary of an activity from list endpoints
@@ -16,7 +18,7 @@ type ActivitySummary struct {
 func (c *Client) GetActivity(athleteID int64, activityID int64) (json.RawMessage, error) {
 	path := fmt.Sprintf("/activities/%d", activityID)
 
-	respBody, err := c.doRequest("GET", path, athleteID, nil)
+	respBody, err := c.doRequest("GET", path, athleteID, nil, metrics.OpGetActivity)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get activity %d: %w", activityID, err)
 	}
@@ -41,7 +43,7 @@ func (c *Client) ListActivities(athleteID int64, page, perPage int) ([]int64, bo
 
 	path := "/athlete/activities?" + params.Encode()
 
-	respBody, err := c.doRequest("GET", path, athleteID, nil)
+	respBody, err := c.doRequest("GET", path, athleteID, nil, metrics.OpListActivities)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to list activities: %w", err)
 	}

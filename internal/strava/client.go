@@ -14,6 +14,7 @@ import (
 
 	"plantopo-strava-sync/internal/config"
 	"plantopo-strava-sync/internal/database"
+	"plantopo-strava-sync/internal/metrics"
 )
 
 const (
@@ -95,6 +96,8 @@ func (c *Client) SetTokenURL(url string) {
 
 // ExchangeCode exchanges an authorization code for access and refresh tokens
 func (c *Client) ExchangeCode(code string) (*TokenResponse, error) {
+	start := time.Now()
+
 	data := url.Values{
 		"client_id":     {c.config.StravaClientID},
 		"client_secret": {c.config.StravaClientSecret},
@@ -104,9 +107,17 @@ func (c *Client) ExchangeCode(code string) (*TokenResponse, error) {
 
 	resp, err := c.httpClient.PostForm(c.tokenURL, data)
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		metrics.StravaAPIRequestsTotal.WithLabelValues(metrics.OpExchangeCode, "error").Inc()
+		metrics.StravaAPIRequestDuration.WithLabelValues(metrics.OpExchangeCode, "error").Observe(duration)
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
 	defer resp.Body.Close()
+
+	duration := time.Since(start).Seconds()
+	statusCode := strconv.Itoa(resp.StatusCode)
+	metrics.StravaAPIRequestsTotal.WithLabelValues(metrics.OpExchangeCode, statusCode).Inc()
+	metrics.StravaAPIRequestDuration.WithLabelValues(metrics.OpExchangeCode, statusCode).Observe(duration)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -123,6 +134,7 @@ func (c *Client) ExchangeCode(code string) (*TokenResponse, error) {
 
 // refreshToken refreshes an athlete's access token
 func (c *Client) refreshToken(athlete *database.Athlete) error {
+	start := time.Now()
 	c.logger.Info("Refreshing access token", "athlete_id", athlete.AthleteID)
 
 	data := url.Values{
@@ -134,9 +146,17 @@ func (c *Client) refreshToken(athlete *database.Athlete) error {
 
 	resp, err := c.httpClient.PostForm(c.tokenURL, data)
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		metrics.StravaAPIRequestsTotal.WithLabelValues(metrics.OpRefreshToken, "error").Inc()
+		metrics.StravaAPIRequestDuration.WithLabelValues(metrics.OpRefreshToken, "error").Observe(duration)
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
 	defer resp.Body.Close()
+
+	duration := time.Since(start).Seconds()
+	statusCode := strconv.Itoa(resp.StatusCode)
+	metrics.StravaAPIRequestsTotal.WithLabelValues(metrics.OpRefreshToken, statusCode).Inc()
+	metrics.StravaAPIRequestDuration.WithLabelValues(metrics.OpRefreshToken, statusCode).Observe(duration)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -185,7 +205,9 @@ func (c *Client) ensureValidToken(athleteID int64) (*database.Athlete, error) {
 }
 
 // doRequest performs an authenticated request to the Strava API
-func (c *Client) doRequest(method, path string, athleteID int64, body io.Reader) ([]byte, error) {
+func (c *Client) doRequest(method, path string, athleteID int64, body io.Reader, operation string) ([]byte, error) {
+	start := time.Now()
+
 	athlete, err := c.ensureValidToken(athleteID)
 	if err != nil {
 		return nil, err
@@ -204,6 +226,9 @@ func (c *Client) doRequest(method, path string, athleteID int64, body io.Reader)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		metrics.StravaAPIRequestsTotal.WithLabelValues(operation, "error").Inc()
+		metrics.StravaAPIRequestDuration.WithLabelValues(operation, "error").Observe(duration)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -215,6 +240,12 @@ func (c *Client) doRequest(method, path string, athleteID int64, body io.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
+
+	// Record metrics
+	duration := time.Since(start).Seconds()
+	statusCode := strconv.Itoa(resp.StatusCode)
+	metrics.StravaAPIRequestsTotal.WithLabelValues(operation, statusCode).Inc()
+	metrics.StravaAPIRequestDuration.WithLabelValues(operation, statusCode).Observe(duration)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, &HTTPError{
@@ -270,6 +301,16 @@ func (c *Client) updateRateLimits(resp *http.Response) {
 	}
 
 	c.rateLimits.lastUpdated = time.Now()
+
+	// Update Prometheus gauges
+	metrics.StravaRateLimitUsage.WithLabelValues(metrics.RateLimitOverall15Min, metrics.BucketLimit).Set(float64(c.rateLimits.overallLimit15Min))
+	metrics.StravaRateLimitUsage.WithLabelValues(metrics.RateLimitOverall15Min, metrics.BucketUsage).Set(float64(c.rateLimits.overallUsage15Min))
+	metrics.StravaRateLimitUsage.WithLabelValues(metrics.RateLimitOverallDaily, metrics.BucketLimit).Set(float64(c.rateLimits.overallLimitDaily))
+	metrics.StravaRateLimitUsage.WithLabelValues(metrics.RateLimitOverallDaily, metrics.BucketUsage).Set(float64(c.rateLimits.overallUsageDaily))
+	metrics.StravaRateLimitUsage.WithLabelValues(metrics.RateLimitRead15Min, metrics.BucketLimit).Set(float64(c.rateLimits.readLimit15Min))
+	metrics.StravaRateLimitUsage.WithLabelValues(metrics.RateLimitRead15Min, metrics.BucketUsage).Set(float64(c.rateLimits.readUsage15Min))
+	metrics.StravaRateLimitUsage.WithLabelValues(metrics.RateLimitReadDaily, metrics.BucketLimit).Set(float64(c.rateLimits.readLimitDaily))
+	metrics.StravaRateLimitUsage.WithLabelValues(metrics.RateLimitReadDaily, metrics.BucketUsage).Set(float64(c.rateLimits.readUsageDaily))
 
 	// Calculate usage percentages
 	overallPct15Min := float64(c.rateLimits.overallUsage15Min) / float64(c.rateLimits.overallLimit15Min) * 100

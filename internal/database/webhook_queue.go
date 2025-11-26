@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"plantopo-strava-sync/internal/metrics"
 )
 
 // WebhookQueueItem represents a webhook awaiting hydration
@@ -25,17 +28,25 @@ const (
 
 // EnqueueWebhook adds a webhook to the processing queue
 func (d *DB) EnqueueWebhook(data json.RawMessage) (int64, error) {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpEnqueueWebhook))
+	defer timer.ObserveDuration()
+
 	query := `INSERT INTO webhook_queue (data) VALUES (?)`
 
 	result, err := d.db.Exec(query, data)
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpEnqueueWebhook).Inc()
 		return 0, fmt.Errorf("failed to enqueue webhook: %w", err)
 	}
 
 	id, err := result.LastInsertId()
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpEnqueueWebhook).Inc()
 		return 0, fmt.Errorf("failed to get queue item id: %w", err)
 	}
+
+	// Record successful enqueue
+	metrics.QueueEnqueueTotal.WithLabelValues(metrics.QueueTypeWebhook).Inc()
 
 	return id, nil
 }
@@ -47,6 +58,9 @@ func (d *DB) EnqueueWebhook(data json.RawMessage) (int64, error) {
 // - processing_started_at is NULL or stale (older than StaleLockTimeout)
 // Uses UPDATE to atomically claim the webhook, preventing race conditions
 func (d *DB) ClaimWebhook() (*WebhookQueueItem, error) {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpClaimWebhook))
+	defer timer.ObserveDuration()
+
 	now := time.Now()
 	staleThreshold := now.Add(-StaleLockTimeout).Unix()
 
@@ -81,6 +95,7 @@ func (d *DB) ClaimWebhook() (*WebhookQueueItem, error) {
 		if err.Error() == "sql: no rows in result set" {
 			return nil, nil // No items ready
 		}
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpClaimWebhook).Inc()
 		return nil, fmt.Errorf("failed to claim webhook: %w", err)
 	}
 
@@ -96,10 +111,14 @@ func (d *DB) ClaimWebhook() (*WebhookQueueItem, error) {
 
 // DeleteWebhook deletes a processed webhook from the queue
 func (d *DB) DeleteWebhook(id int64) error {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpDeleteWebhook))
+	defer timer.ObserveDuration()
+
 	query := `DELETE FROM webhook_queue WHERE id = ?`
 
 	_, err := d.db.Exec(query, id)
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpDeleteWebhook).Inc()
 		return fmt.Errorf("failed to complete webhook: %w", err)
 	}
 
@@ -110,6 +129,9 @@ func (d *DB) DeleteWebhook(id int64) error {
 // Uses exponential backoff: 1min, 5min, 15min, 30min, 1hr, etc.
 // Returns true if the webhook was released, false if it was dropped due to max retries
 func (d *DB) ReleaseWebhook(id int64, retryCount int, errMsg string) (bool, error) {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpReleaseWebhook))
+	defer timer.ObserveDuration()
+
 	newRetryCount := retryCount + 1
 
 	// Drop webhook if it has exceeded max retries
@@ -141,6 +163,7 @@ func (d *DB) ReleaseWebhook(id int64, retryCount int, errMsg string) (bool, erro
 
 	_, err := d.db.Exec(query, newRetryCount, errMsg, nextRetryAt.Unix(), id)
 	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpReleaseWebhook).Inc()
 		return false, fmt.Errorf("failed to release webhook: %w", err)
 	}
 
@@ -179,6 +202,28 @@ func (d *DB) GetReadyQueueLength() (int, error) {
 	err := d.db.QueryRow(query, now.Unix(), staleThreshold).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get ready queue length: %w", err)
+	}
+
+	return count, nil
+}
+
+// GetProcessingWebhookQueueLength returns the number of items currently being processed
+// Items are considered processing if they have a recent processing_started_at timestamp
+func (d *DB) GetProcessingWebhookQueueLength() (int, error) {
+	now := time.Now()
+	staleThreshold := now.Add(-StaleLockTimeout).Unix()
+
+	query := `
+		SELECT COUNT(*)
+		FROM webhook_queue
+		WHERE processing_started_at IS NOT NULL
+		  AND processing_started_at >= ?
+	`
+	var count int
+
+	err := d.db.QueryRow(query, staleThreshold).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get processing queue length: %w", err)
 	}
 
 	return count, nil
