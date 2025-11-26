@@ -22,6 +22,7 @@ data/
 *.db
 *.db-shm
 *.db-wal
+data.sqlite*
 
 # IDE
 .idea/
