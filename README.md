@@ -37,7 +37,7 @@ deleted. The athlete delete event is retained.
 
 Events do not appear until they have been hydrated.
 
-Authorization: Provide the header `Authorization: <INTERNAL_API_KEY>`
+Authorization: Provide the header `Authorization: Bearer <INTERNAL_API_KEY>`
 
 Parameters:
 - cursor (int, optional): The ID of the last event seen.
