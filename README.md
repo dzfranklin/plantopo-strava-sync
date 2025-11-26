@@ -8,6 +8,8 @@ with `plantopo-strava-sync --list-strava-subscriptions`,
 `plantopo-strava-sync --delete-strava-subscription <id>`, and
 `plantopo-strava-sync --create-strava-subscription <callback_url>`.
 
+See .env.example for configuration.
+
 ## API
 
 ### `/oauth-callback`
