@@ -241,7 +241,7 @@ func TestSyncAllActivities_InvalidAthleteID(t *testing.T) {
 	defer db.Close()
 
 	// Test with non-existent athlete (should fail with unauthorized)
-	err := worker.syncAllActivities(99999)
+	err := worker.listActivities(99999)
 	// Should not error, just logs and skips
 	if err != nil {
 		t.Logf("Got expected error for non-existent athlete: %v", err)
@@ -456,25 +456,34 @@ func TestSyncAllActivities_Integration(t *testing.T) {
 	// Override base URL in worker's strava client
 	worker.stravaClient.SetBaseURL(apiServer.URL)
 
-	// Test syncAllActivities
-	err = worker.syncAllActivities(athleteID)
+	// Test listActivities
+	err = worker.listActivities(athleteID)
 	if err != nil {
-		t.Fatalf("Failed to sync all activities: %v", err)
+		t.Fatalf("Failed to list activities: %v", err)
 	}
 
-	// Verify correct number of API calls
-	if activityDetailsRequests != 2 {
-		t.Errorf("Expected 2 activity details requests, got %d", activityDetailsRequests)
+	// Verify no activity details requests (listActivities only lists, doesn't fetch)
+	if activityDetailsRequests != 0 {
+		t.Errorf("Expected 0 activity details requests from listActivities, got %d", activityDetailsRequests)
 	}
 
-	// Verify NO events were created (sync doesn't create events)
+	// Verify sync jobs were created
+	readyJobs, err := db.GetReadySyncJobQueueLength()
+	if err != nil {
+		t.Fatalf("Failed to get sync job queue length: %v", err)
+	}
+	if readyJobs != 2 {
+		t.Errorf("Expected 2 sync jobs to be created, got %d", readyJobs)
+	}
+
+	// Verify NO events were created yet (listActivities only creates sync jobs, not events)
 	events, err := db.ListEvents(athleteID, 0, 10)
 	if err != nil {
 		t.Fatalf("Failed to list events: %v", err)
 	}
 
 	if len(events) != 0 {
-		t.Errorf("Expected 0 events (sync doesn't create events), got %d", len(events))
+		t.Errorf("Expected 0 events from listActivities (only creates sync jobs), got %d", len(events))
 	}
 }
 

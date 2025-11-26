@@ -30,7 +30,8 @@ CREATE INDEX IF NOT EXISTS idx_webhook_queue_ready ON webhook_queue(next_retry_a
 CREATE TABLE IF NOT EXISTS sync_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     athlete_id INTEGER NOT NULL,
-    job_type TEXT NOT NULL DEFAULT 'sync_all_activities', -- Job type for future extensibility
+    job_type TEXT NOT NULL DEFAULT 'sync_all_activities', -- Job types: 'list_activities', 'sync_activity'
+    activity_id INTEGER, -- For sync_activity jobs
     retry_count INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
     next_retry_at INTEGER, -- Unix timestamp, NULL = process immediately
@@ -49,18 +50,19 @@ CREATE INDEX IF NOT EXISTS idx_sync_jobs_athlete_id ON sync_jobs(athlete_id);
 -- Supports event types:
 --   1. athlete_connected: When an athlete authorizes the app
 --   2. webhook: Activity events from Strava webhooks (create/update/delete)
+--   3. backfill: Historical activity from backfill sync
 CREATE TABLE IF NOT EXISTS events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_type TEXT NOT NULL CHECK(event_type IN ('athlete_connected', 'webhook')),
+    event_type TEXT NOT NULL CHECK(event_type IN ('athlete_connected', 'webhook', 'backfill')),
     athlete_id INTEGER NOT NULL,
 
-    -- For webhook events with activities
+    -- For webhook and backfill events with activities
     activity_id INTEGER,
 
     -- JSON data fields (nullable based on event type)
     athlete_summary TEXT, -- JSON: For athlete_connected events
-    activity TEXT, -- JSON: For webhook events (detailed activity from API)
-    webhook_event TEXT, -- JSON: For webhook events (raw webhook data)
+    activity TEXT, -- JSON: For webhook and backfill events (detailed activity from API)
+    webhook_event TEXT, -- JSON: For webhook events only (raw webhook data)
 
     created_at INTEGER NOT NULL DEFAULT (unixepoch()) -- Unix timestamp
 );

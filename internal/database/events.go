@@ -16,6 +16,7 @@ type EventType string
 const (
 	EventTypeAthleteConnected EventType = "athlete_connected"
 	EventTypeWebhook          EventType = "webhook"
+	EventTypeBackfill         EventType = "backfill"
 )
 
 // Event represents an event in the event stream
@@ -159,6 +160,31 @@ func (d *DB) InsertActivityEvent(athleteID int64, activityID *int64, activityDat
 	if err != nil {
 		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpInsertActivityEvent).Inc()
 		return 0, fmt.Errorf("failed to insert activity event: %w", err)
+	}
+
+	eventID, err := result.LastInsertId()
+	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpInsertActivityEvent).Inc()
+		return 0, fmt.Errorf("failed to get event_id: %w", err)
+	}
+
+	return eventID, nil
+}
+
+// InsertBackfillEvent inserts a backfill event for historical activity sync
+func (d *DB) InsertBackfillEvent(athleteID int64, activityID int64, activityData json.RawMessage) (int64, error) {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpInsertActivityEvent))
+	defer timer.ObserveDuration()
+
+	query := `
+		INSERT INTO events (event_type, athlete_id, activity_id, activity)
+		VALUES (?, ?, ?, ?)
+	`
+
+	result, err := d.db.Exec(query, "backfill", athleteID, activityID, activityData)
+	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpInsertActivityEvent).Inc()
+		return 0, fmt.Errorf("failed to insert backfill event: %w", err)
 	}
 
 	eventID, err := result.LastInsertId()

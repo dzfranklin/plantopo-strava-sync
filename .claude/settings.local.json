@@ -20,7 +20,8 @@
       "Bash(./plantopo-strava-sync:*)",
       "Bash(find:*)",
       "Bash(kill:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(go vet:*)"
     ],
     "deny": [],
     "ask": []

@@ -13,6 +13,7 @@ type SyncJob struct {
 	ID                  int64
 	AthleteID           int64
 	JobType             string
+	ActivityID          *int64 // For sync_activity jobs
 	RetryCount          int
 	LastError           *string
 	NextRetryAt         *time.Time
@@ -31,6 +32,31 @@ func (d *DB) EnqueueSyncJob(athleteID int64, jobType string) (int64, error) {
 	if err != nil {
 		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpEnqueueSyncJob).Inc()
 		return 0, fmt.Errorf("failed to enqueue sync job: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpEnqueueSyncJob).Inc()
+		return 0, fmt.Errorf("failed to get sync job id: %w", err)
+	}
+
+	// Record successful enqueue
+	metrics.QueueEnqueueTotal.WithLabelValues(metrics.QueueTypeSyncJob).Inc()
+
+	return id, nil
+}
+
+// EnqueueActivitySyncJob adds an activity sync job to the processing queue
+func (d *DB) EnqueueActivitySyncJob(athleteID int64, activityID int64) (int64, error) {
+	timer := prometheus.NewTimer(metrics.DBOperationDuration.WithLabelValues(metrics.DBOpEnqueueSyncJob))
+	defer timer.ObserveDuration()
+
+	query := `INSERT INTO sync_jobs (athlete_id, job_type, activity_id) VALUES (?, 'sync_activity', ?)`
+
+	result, err := d.db.Exec(query, athleteID, activityID)
+	if err != nil {
+		metrics.DBOperationErrorsTotal.WithLabelValues(metrics.DBOpEnqueueSyncJob).Inc()
+		return 0, fmt.Errorf("failed to enqueue activity sync job: %w", err)
 	}
 
 	id, err := result.LastInsertId()
@@ -71,7 +97,7 @@ func (d *DB) ClaimSyncJob() (*SyncJob, error) {
 			ORDER BY id ASC
 			LIMIT 1
 		)
-		RETURNING id, athlete_id, job_type, retry_count, last_error, next_retry_at, created_at
+		RETURNING id, athlete_id, job_type, activity_id, retry_count, last_error, next_retry_at, created_at
 	`
 
 	var job SyncJob
@@ -83,6 +109,7 @@ func (d *DB) ClaimSyncJob() (*SyncJob, error) {
 		&job.ID,
 		&job.AthleteID,
 		&job.JobType,
+		&job.ActivityID,
 		&job.RetryCount,
 		&lastError,
 		&nextRetryAt,

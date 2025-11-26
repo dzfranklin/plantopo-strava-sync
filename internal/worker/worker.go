@@ -147,8 +147,21 @@ func (w *Worker) processSyncJob(job *database.SyncJob) {
 
 	var err error
 	switch job.JobType {
-	case "sync_all_activities":
-		err = w.syncAllActivities(job.AthleteID)
+	case "list_activities":
+		err = w.listActivities(job.AthleteID)
+	case "sync_activity":
+		if job.ActivityID == nil {
+			w.logger.Error("sync_activity job missing activity_id", "id", job.ID)
+			// Invalid job - delete it
+			if err := w.db.DeleteSyncJob(job.ID); err != nil {
+				w.logger.Error("Failed to delete invalid sync_activity job", "id", job.ID, "error", err)
+			}
+			duration := time.Since(start).Seconds()
+			metrics.QueueProcessingDuration.WithLabelValues(metrics.QueueTypeSyncJob, metrics.ResultSuccess).Observe(duration)
+			metrics.QueueDequeueTotal.WithLabelValues(metrics.QueueTypeSyncJob, metrics.ResultDropped).Inc()
+			return
+		}
+		err = w.syncActivity(job.AthleteID, *job.ActivityID)
 	default:
 		w.logger.Warn("Unknown sync job type", "id", job.ID, "job_type", job.JobType)
 		// Unknown types are not retryable - complete them
@@ -182,9 +195,9 @@ func (w *Worker) processSyncJob(job *database.SyncJob) {
 	}
 }
 
-// syncAllActivities processes a sync_all_activities job (fetches all historical activities)
-func (w *Worker) syncAllActivities(athleteID int64) error {
-	w.logger.Info("Starting sync_all_activities for athlete", "athlete_id", athleteID)
+// listActivities lists all activities for an athlete and creates sync_activity jobs
+func (w *Worker) listActivities(athleteID int64) error {
+	w.logger.Info("Starting list_activities for athlete", "athlete_id", athleteID)
 
 	page := 1
 	perPage := 200
@@ -195,30 +208,29 @@ func (w *Worker) syncAllActivities(athleteID int64) error {
 		if err != nil {
 			// Check if it's a rate limit error
 			if strava.IsTooManyRequests(err) {
-				return fmt.Errorf("rate limited during sync_all: %w", err)
+				return fmt.Errorf("rate limited during list_activities: %w", err)
 			}
 			// Check if it's an auth error
 			if strava.IsUnauthorized(err) {
-				w.logger.Warn("Athlete unauthorized during sync, skipping", "athlete_id", athleteID)
+				w.logger.Warn("Athlete unauthorized during list, skipping", "athlete_id", athleteID)
 				return nil // Don't retry unauthorized athletes
 			}
 			return fmt.Errorf("failed to list activities (page %d): %w", page, err)
 		}
 
-		// Sync each activity
+		// Create sync job for each activity
 		for _, activityID := range activityIDs {
-			if err := w.syncActivity(athleteID, activityID); err != nil {
-				// Log but continue with other activities
-				w.logger.Error("Failed to sync activity",
+			if _, err := w.db.EnqueueActivitySyncJob(athleteID, activityID); err != nil {
+				w.logger.Error("Failed to enqueue activity sync job",
 					"athlete_id", athleteID,
 					"activity_id", activityID,
 					"error", err)
-				// Don't fail the entire sync for one activity
+				// Continue with other activities
 			}
 		}
 
 		totalActivities += len(activityIDs)
-		w.logger.Info("Synced activities page",
+		w.logger.Info("Listed activities page and created sync jobs",
 			"athlete_id", athleteID,
 			"page", page,
 			"count", len(activityIDs),
@@ -234,12 +246,12 @@ func (w *Worker) syncAllActivities(athleteID int64) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	w.logger.Info("Completed sync_all for athlete",
+	w.logger.Info("Completed list_activities for athlete",
 		"athlete_id", athleteID,
 		"total_activities", totalActivities)
 
 	// Record business metrics
-	metrics.SyncJobsCompletedTotal.WithLabelValues("sync_all_activities").Inc()
+	metrics.SyncJobsCompletedTotal.WithLabelValues("list_activities").Inc()
 	metrics.SyncAllActivitiesCount.Observe(float64(totalActivities))
 
 	return nil
@@ -421,11 +433,16 @@ func (w *Worker) syncActivity(athleteID, activityID int64) error {
 		return fmt.Errorf("failed to get activity: %w", err)
 	}
 
-	// TODO: Store activity data in activities table once it's implemented
-	// For now, just fetch to validate access and prepare for future storage
-	w.logger.Debug("Synced activity",
+	// Insert backfill event
+	eventID, err := w.db.InsertBackfillEvent(athleteID, activityID, activityData)
+	if err != nil {
+		return fmt.Errorf("failed to insert backfill event: %w", err)
+	}
+
+	w.logger.Debug("Synced activity and created backfill event",
 		"athlete_id", athleteID,
 		"activity_id", activityID,
+		"event_id", eventID,
 		"activity_data_size", len(activityData))
 
 	return nil

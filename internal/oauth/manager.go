@@ -135,12 +135,12 @@ func (m *Manager) HandleCallback(code, state string) (int64, error) {
 
 	m.logger.Info("Inserted athlete_connected event", "athlete_id", athleteID, "event_id", eventID)
 
-	// Enqueue sync job to trigger historical activity sync
-	if _, err := m.db.EnqueueSyncJob(athleteID, "sync_all_activities"); err != nil {
+	// Enqueue sync job to trigger historical activity listing
+	if _, err := m.db.EnqueueSyncJob(athleteID, "list_activities"); err != nil {
 		m.logger.Error("Failed to enqueue sync job", "error", err, "athlete_id", athleteID)
 		// Don't fail the OAuth flow if sync enqueueing fails
 	} else {
-		m.logger.Info("Enqueued sync job", "athlete_id", athleteID, "job_type", "sync_all_activities")
+		m.logger.Info("Enqueued sync job", "athlete_id", athleteID, "job_type", "list_activities")
 	}
 
 	return athleteID, nil
