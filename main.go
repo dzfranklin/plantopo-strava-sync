@@ -28,13 +28,14 @@ func main() {
 	// Define CLI flags
 	listSubscriptions := flag.Bool("list-strava-subscriptions", false, "List all Strava webhook subscriptions")
 	deleteSubscription := flag.String("delete-strava-subscription", "", "Delete a Strava webhook subscription by ID")
-	createSubscription := flag.String("create-strava-subscription", "", "Create a Strava webhook subscription with callback URL")
+	createSubscription := flag.String("create-strava-subscription", "", "Create a Strava webhook subscription with domain (e.g., example.com)")
+	clientID := flag.String("client-id", "", "Strava client identifier (primary or secondary)")
 
 	flag.Parse()
 
 	// Check if any CLI command was requested
 	if *listSubscriptions || *deleteSubscription != "" || *createSubscription != "" {
-		runCLI(*listSubscriptions, *deleteSubscription, *createSubscription)
+		runCLI(*listSubscriptions, *deleteSubscription, *createSubscription, *clientID)
 		return
 	}
 
@@ -42,7 +43,7 @@ func main() {
 	runServer()
 }
 
-func runCLI(listSubs bool, deleteSub, createSub string) {
+func runCLI(listSubs bool, deleteSub, createSub, clientID string) {
 	// Disable structured logging for CLI
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelError, // Only show errors
@@ -52,6 +53,19 @@ func runCLI(listSubs bool, deleteSub, createSub string) {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to load configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Default client_id if not specified
+	if clientID == "" {
+		clientID = cfg.GetDefaultClientID()
+		fmt.Printf("Using default client: %s\n\n", clientID)
+	}
+
+	// Validate client_id
+	if !cfg.HasClient(clientID) {
+		fmt.Fprintf(os.Stderr, "Error: Unknown client_id: %s\n", clientID)
+		fmt.Fprintf(os.Stderr, "Available clients: %v\n", cfg.GetClientIDs())
 		os.Exit(1)
 	}
 
@@ -69,18 +83,18 @@ func runCLI(listSubs bool, deleteSub, createSub string) {
 	// Handle commands
 	switch {
 	case listSubs:
-		handleListSubscriptions(client)
+		handleListSubscriptions(client, clientID)
 	case deleteSub != "":
-		handleDeleteSubscription(client, deleteSub)
+		handleDeleteSubscription(client, deleteSub, clientID)
 	case createSub != "":
-		handleCreateSubscription(client, cfg, createSub)
+		handleCreateSubscription(client, cfg, createSub, clientID)
 	}
 }
 
-func handleListSubscriptions(client *strava.Client) {
-	fmt.Println("Fetching subscriptions...")
+func handleListSubscriptions(client *strava.Client, clientID string) {
+	fmt.Printf("Fetching subscriptions for client: %s\n", clientID)
 
-	subscriptions, err := client.ListSubscriptions()
+	subscriptions, err := client.ListSubscriptions(clientID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to list subscriptions: %v\n", err)
 		os.Exit(1)
@@ -102,16 +116,16 @@ func handleListSubscriptions(client *strava.Client) {
 	}
 }
 
-func handleDeleteSubscription(client *strava.Client, idStr string) {
+func handleDeleteSubscription(client *strava.Client, idStr, clientID string) {
 	subscriptionID, err := strconv.Atoi(idStr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Invalid subscription ID: %s\n", idStr)
 		os.Exit(1)
 	}
 
-	fmt.Printf("Deleting subscription %d...\n", subscriptionID)
+	fmt.Printf("Deleting subscription %d (client: %s)...\n", subscriptionID, clientID)
 
-	err = client.DeleteSubscription(subscriptionID)
+	err = client.DeleteSubscription(subscriptionID, clientID)
 	if err != nil {
 		if httpErr, ok := err.(*strava.HTTPError); ok && httpErr.StatusCode == 404 {
 			fmt.Fprintf(os.Stderr, "Error: Subscription %d not found\n", subscriptionID)
@@ -124,13 +138,24 @@ func handleDeleteSubscription(client *strava.Client, idStr string) {
 	fmt.Println("✓ Subscription deleted successfully!")
 }
 
-func handleCreateSubscription(client *strava.Client, cfg *config.Config, callbackURL string) {
+func handleCreateSubscription(client *strava.Client, cfg *config.Config, domain, clientID string) {
+	// Get client config for verify token
+	clientConfig, err := cfg.GetClient(clientID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Build callback URL with client_id query parameter
+	callbackURL := fmt.Sprintf("https://%s/webhook-callback?client_id=%s", domain, clientID)
+
 	fmt.Printf("Creating webhook subscription...\n")
+	fmt.Printf("Client: %s\n", clientID)
 	fmt.Printf("Callback URL: %s\n", callbackURL)
-	fmt.Printf("Verify Token: %s\n", cfg.StravaVerifyToken)
+	fmt.Printf("Verify Token: %s\n", clientConfig.VerifyToken)
 	fmt.Println()
 
-	subscription, err := client.CreateSubscription(callbackURL, cfg.StravaVerifyToken)
+	subscription, err := client.CreateSubscription(callbackURL, clientConfig.VerifyToken, clientID)
 	if err != nil {
 		if httpErr, ok := err.(*strava.HTTPError); ok {
 			fmt.Fprintf(os.Stderr, "Error: Subscription creation failed (HTTP %d)\n", httpErr.StatusCode)

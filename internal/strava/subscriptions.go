@@ -27,10 +27,15 @@ type Subscription struct {
 
 // CreateSubscription creates a new webhook subscription
 // Note: This does not require athlete authentication, only app credentials
-func (c *Client) CreateSubscription(callbackURL, verifyToken string) (*Subscription, error) {
+func (c *Client) CreateSubscription(callbackURL, verifyToken, clientID string) (*Subscription, error) {
+	clientConfig, err := c.config.GetClient(clientID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid client: %w", err)
+	}
+
 	data := url.Values{
-		"client_id":     {c.config.StravaClientID},
-		"client_secret": {c.config.StravaClientSecret},
+		"client_id":     {clientConfig.ClientID},
+		"client_secret": {clientConfig.ClientSecret},
 		"callback_url":  {callbackURL},
 		"verify_token":  {verifyToken},
 	}
@@ -59,10 +64,15 @@ func (c *Client) CreateSubscription(callbackURL, verifyToken string) (*Subscript
 }
 
 // ListSubscriptions lists all active webhook subscriptions for this application
-func (c *Client) ListSubscriptions() ([]*Subscription, error) {
+func (c *Client) ListSubscriptions(clientID string) ([]*Subscription, error) {
+	clientConfig, err := c.config.GetClient(clientID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid client: %w", err)
+	}
+
 	params := url.Values{
-		"client_id":     {c.config.StravaClientID},
-		"client_secret": {c.config.StravaClientSecret},
+		"client_id":     {clientConfig.ClientID},
+		"client_secret": {clientConfig.ClientSecret},
 	}
 
 	reqURL := c.baseURL + "/push_subscriptions?" + params.Encode()
@@ -95,10 +105,15 @@ func (c *Client) ListSubscriptions() ([]*Subscription, error) {
 }
 
 // DeleteSubscription deletes a webhook subscription
-func (c *Client) DeleteSubscription(subscriptionID int) error {
+func (c *Client) DeleteSubscription(subscriptionID int, clientID string) error {
+	clientConfig, err := c.config.GetClient(clientID)
+	if err != nil {
+		return fmt.Errorf("invalid client: %w", err)
+	}
+
 	params := url.Values{
-		"client_id":     {c.config.StravaClientID},
-		"client_secret": {c.config.StravaClientSecret},
+		"client_id":     {clientConfig.ClientID},
+		"client_secret": {clientConfig.ClientSecret},
 	}
 
 	reqURL := fmt.Sprintf("%s/push_subscriptions/%d?%s", c.baseURL, subscriptionID, params.Encode())
@@ -125,10 +140,15 @@ func (c *Client) DeleteSubscription(subscriptionID int) error {
 }
 
 // ViewSubscription retrieves details about a specific subscription
-func (c *Client) ViewSubscription(subscriptionID int) (*Subscription, error) {
+func (c *Client) ViewSubscription(subscriptionID int, clientID string) (*Subscription, error) {
+	clientConfig, err := c.config.GetClient(clientID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid client: %w", err)
+	}
+
 	params := url.Values{
-		"client_id":     {c.config.StravaClientID},
-		"client_secret": {c.config.StravaClientSecret},
+		"client_id":     {clientConfig.ClientID},
+		"client_secret": {clientConfig.ClientSecret},
 	}
 
 	reqURL := fmt.Sprintf("%s/push_subscriptions/%d?%s", c.baseURL, subscriptionID, params.Encode())

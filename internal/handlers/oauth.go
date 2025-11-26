@@ -32,6 +32,19 @@ func (h *OAuthHandler) HandleAuthStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Extract client_id from query parameter
+	clientID := r.URL.Query().Get("client_id")
+	if clientID == "" {
+		clientID = h.config.GetDefaultClientID()
+	}
+
+	// Validate client_id
+	if !h.config.HasClient(clientID) {
+		h.logger.Warn("Invalid client_id", "client_id", clientID)
+		http.Error(w, "Invalid client_id", http.StatusBadRequest)
+		return
+	}
+
 	// Build redirect URI (same host/port as current request)
 	scheme := "http"
 	if r.TLS != nil {
@@ -39,15 +52,15 @@ func (h *OAuthHandler) HandleAuthStart(w http.ResponseWriter, r *http.Request) {
 	}
 	redirectURI := fmt.Sprintf("%s://%s/oauth-callback", scheme, r.Host)
 
-	// Generate authorization URL
-	authURL, state, err := h.oauthManager.GenerateAuthURL(redirectURI)
+	// Generate authorization URL with client ID
+	authURL, state, err := h.oauthManager.GenerateAuthURL(redirectURI, clientID)
 	if err != nil {
 		h.logger.Error("Failed to generate auth URL", "error", err)
 		http.Error(w, "Failed to start OAuth flow", http.StatusInternalServerError)
 		return
 	}
 
-	h.logger.Info("Starting OAuth flow", "state", state, "redirect_uri", redirectURI)
+	h.logger.Info("Starting OAuth flow", "state", state, "redirect_uri", redirectURI, "client_id", clientID)
 
 	// Redirect user to Strava authorization page
 	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
@@ -82,7 +95,7 @@ func (h *OAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("Processing OAuth callback", "code_length", len(code), "state", state)
 
 	// Handle the callback (exchange code, store athlete, enqueue sync)
-	athleteID, err := h.oauthManager.HandleCallback(code, state)
+	athleteID, clientID, err := h.oauthManager.HandleCallback(code, state)
 	if err != nil {
 		h.logger.Error("Failed to handle OAuth callback", "error", err)
 
@@ -96,7 +109,7 @@ func (h *OAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info("OAuth flow completed successfully", "athlete_id", athleteID)
+	h.logger.Info("OAuth flow completed successfully", "athlete_id", athleteID, "client_id", clientID)
 
 	// Success! Return simple HTML page
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

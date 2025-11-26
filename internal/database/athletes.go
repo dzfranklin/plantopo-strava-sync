@@ -13,6 +13,7 @@ import (
 // Athlete represents an athlete's authentication data in the database
 type Athlete struct {
 	AthleteID      int64
+	ClientID       string          // Strava client identifier (primary/secondary)
 	AccessToken    string
 	RefreshToken   string
 	TokenExpiresAt time.Time
@@ -27,9 +28,10 @@ func (d *DB) UpsertAthlete(athlete *Athlete) error {
 	defer timer.ObserveDuration()
 
 	query := `
-		INSERT INTO athletes (athlete_id, access_token, refresh_token, token_expires_at, athlete_summary, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO athletes (athlete_id, client_id, access_token, refresh_token, token_expires_at, athlete_summary, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(athlete_id) DO UPDATE SET
+			client_id = excluded.client_id,
 			access_token = excluded.access_token,
 			refresh_token = excluded.refresh_token,
 			token_expires_at = excluded.token_expires_at,
@@ -39,6 +41,7 @@ func (d *DB) UpsertAthlete(athlete *Athlete) error {
 
 	_, err := d.db.Exec(query,
 		athlete.AthleteID,
+		athlete.ClientID,
 		athlete.AccessToken,
 		athlete.RefreshToken,
 		athlete.TokenExpiresAt.Unix(),
@@ -61,7 +64,7 @@ func (d *DB) GetAthlete(athleteID int64) (*Athlete, error) {
 	defer timer.ObserveDuration()
 
 	query := `
-		SELECT athlete_id, access_token, refresh_token, token_expires_at, athlete_summary, created_at, updated_at
+		SELECT athlete_id, client_id, access_token, refresh_token, token_expires_at, athlete_summary, created_at, updated_at
 		FROM athletes
 		WHERE athlete_id = ?
 	`
@@ -71,6 +74,7 @@ func (d *DB) GetAthlete(athleteID int64) (*Athlete, error) {
 
 	err := d.db.QueryRow(query, athleteID).Scan(
 		&athlete.AthleteID,
+		&athlete.ClientID,
 		&athlete.AccessToken,
 		&athlete.RefreshToken,
 		&expiresAt,

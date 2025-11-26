@@ -3,6 +3,7 @@ PRAGMA journal_mode=WAL;
 -- Athletes table stores authentication tokens and athlete data
 CREATE TABLE IF NOT EXISTS athletes (
     athlete_id INTEGER PRIMARY KEY,
+    client_id TEXT NOT NULL, -- Strava client identifier (primary/secondary)
     access_token TEXT NOT NULL,
     refresh_token TEXT NOT NULL,
     token_expires_at INTEGER NOT NULL, -- Unix timestamp
@@ -10,6 +11,9 @@ CREATE TABLE IF NOT EXISTS athletes (
     created_at INTEGER NOT NULL DEFAULT (unixepoch()), -- Unix timestamp
     updated_at INTEGER NOT NULL DEFAULT (unixepoch()) -- Unix timestamp
 );
+
+-- Index for client_id lookups
+CREATE INDEX IF NOT EXISTS idx_athletes_client_id ON athletes(client_id);
 
 -- Webhook queue for events pending hydration
 -- Events do not appear in the events table until they have been hydrated

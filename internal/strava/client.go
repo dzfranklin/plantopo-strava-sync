@@ -95,12 +95,18 @@ func (c *Client) SetTokenURL(url string) {
 }
 
 // ExchangeCode exchanges an authorization code for access and refresh tokens
-func (c *Client) ExchangeCode(code string) (*TokenResponse, error) {
+func (c *Client) ExchangeCode(code string, clientID string) (*TokenResponse, error) {
 	start := time.Now()
 
+	// Get client-specific credentials
+	clientConfig, err := c.config.GetClient(clientID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid client: %w", err)
+	}
+
 	data := url.Values{
-		"client_id":     {c.config.StravaClientID},
-		"client_secret": {c.config.StravaClientSecret},
+		"client_id":     {clientConfig.ClientID},
+		"client_secret": {clientConfig.ClientSecret},
 		"code":          {code},
 		"grant_type":    {"authorization_code"},
 	}
@@ -135,11 +141,17 @@ func (c *Client) ExchangeCode(code string) (*TokenResponse, error) {
 // refreshToken refreshes an athlete's access token
 func (c *Client) refreshToken(athlete *database.Athlete) error {
 	start := time.Now()
-	c.logger.Info("Refreshing access token", "athlete_id", athlete.AthleteID)
+	c.logger.Info("Refreshing access token", "athlete_id", athlete.AthleteID, "client_id", athlete.ClientID)
+
+	// Get client config from athlete's stored client_id
+	clientConfig, err := c.config.GetClient(athlete.ClientID)
+	if err != nil {
+		return fmt.Errorf("invalid client for athlete: %w", err)
+	}
 
 	data := url.Values{
-		"client_id":     {c.config.StravaClientID},
-		"client_secret": {c.config.StravaClientSecret},
+		"client_id":     {clientConfig.ClientID},
+		"client_secret": {clientConfig.ClientSecret},
 		"refresh_token": {athlete.RefreshToken},
 		"grant_type":    {"refresh_token"},
 	}

@@ -6,7 +6,6 @@
       "Bash(go mod:*)",
       "Bash(go build:*)",
       "Bash(chmod:*)",
-      "Bash(./bin/server)",
       "Bash(curl:*)",
       "Bash(source .env)",
       "Bash(set -a)",
@@ -21,10 +20,8 @@
       "Bash(find:*)",
       "Bash(kill:*)",
       "Bash(pkill:*)",
-      "Bash(go vet:*)",
-      "Bash(git -C /Users/daniel/projects/plantopo-strava-sync log --oneline --all)",
-      "Bash(git -C /Users/daniel/projects/plantopo-strava-sync show HEAD:.env.example)",
-      "Bash(git -C /Users/daniel/projects/plantopo-strava-sync status)"
+      "Bash(go *)",
+      "Bash(git *)"
     ],
     "deny": [],
     "ask": []
