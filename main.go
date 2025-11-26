@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -146,8 +147,8 @@ func handleCreateSubscription(client *strava.Client, cfg *config.Config, clientI
 		os.Exit(1)
 	}
 
-	// Build callback URL with client_id query parameter
-	callbackURL := fmt.Sprintf("https://%s/webhook-callback?client_id=%s", cfg.Domain, clientID)
+	// Build callback URL with client path parameter
+	callbackURL := fmt.Sprintf("https://%s/webhook-callback/%s", cfg.Domain, clientID)
 
 	fmt.Printf("Creating webhook subscription...\n")
 	fmt.Printf("Client: %s\n", clientID)
@@ -168,9 +169,6 @@ func handleCreateSubscription(client *strava.Client, cfg *config.Config, clientI
 
 	fmt.Println("✓ Subscription created successfully!")
 	fmt.Printf("  ID: %d\n", subscription.ID)
-	fmt.Printf("  Application ID: %d\n", subscription.ApplicationID)
-	fmt.Printf("  Callback URL: %s\n", subscription.CallbackURL)
-	fmt.Printf("  Created At: %s\n", subscription.CreatedAt)
 }
 
 func runServer() {
@@ -238,17 +236,28 @@ func runServer() {
 	mux.Handle("/oauth-callback", middleware.WrapHandler(metrics.EndpointOAuthCallback, oauthHandler.HandleCallback))
 
 	// Webhook endpoints
-	mux.Handle("/webhook-callback", middleware.WrapHandler(metrics.EndpointWebhook, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			// GET = verification
-			webhookHandler.HandleVerification(w, r)
-		} else if r.Method == http.MethodPost {
-			// POST = event
-			webhookHandler.HandleEvent(w, r)
-		} else {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	}))
+	mux.HandleFunc("/webhook-callback/", func(w http.ResponseWriter, r *http.Request) {
+		// Extract client from path
+		path := strings.TrimPrefix(r.URL.Path, "/webhook-callback/")
+		clientID := strings.TrimSuffix(path, "/")
+
+		// Store client in request context (handlers will validate)
+		ctx := context.WithValue(r.Context(), "client", clientID)
+		r = r.WithContext(ctx)
+
+		// Wrap with metrics and route by method
+		middleware.WrapHandler(metrics.EndpointWebhook, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				// GET = verification
+				webhookHandler.HandleVerification(w, r)
+			} else if r.Method == http.MethodPost {
+				// POST = event
+				webhookHandler.HandleEvent(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+		}).ServeHTTP(w, r)
+	})
 
 	// Events API endpoint
 	mux.Handle("/events", middleware.WrapHandler(metrics.EndpointEvents, eventsHandler.HandleEvents))

@@ -19,9 +19,13 @@ func setupOAuthHandlerTest(t *testing.T) (*OAuthHandler, *database.DB, *oauth.Ma
 	}
 
 	cfg := &config.Config{
-		StravaClientID:     "test_client_id",
-		StravaClientSecret: "test_client_secret",
-		StravaVerifyToken:  "test_verify_token",
+		StravaClients: map[string]*config.StravaClientConfig{
+			"primary": {
+				ClientID:     "test_client_id",
+				ClientSecret: "test_client_secret",
+				VerifyToken:  "test_verify_token",
+			},
+		},
 	}
 
 	stravaClient := strava.NewClient(cfg, db)
@@ -165,7 +169,7 @@ func TestHandleCallback_ConsumedState(t *testing.T) {
 	defer db.Close()
 
 	// Generate a valid state
-	_, state, err := oauthManager.GenerateAuthURL("http://localhost:4101/oauth-callback")
+	_, state, err := oauthManager.GenerateAuthURL("http://localhost:4101/oauth-callback", "primary")
 	if err != nil {
 		t.Fatalf("Failed to generate auth URL: %v", err)
 	}

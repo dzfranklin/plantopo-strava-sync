@@ -26,6 +26,15 @@ func NewWebhookHandler(db *database.DB, cfg *config.Config) *WebhookHandler {
 	}
 }
 
+// extractClientFromContext extracts the client ID from request context
+func extractClientFromContext(r *http.Request) string {
+	client := r.Context().Value("client")
+	if client == nil {
+		return ""
+	}
+	return client.(string)
+}
+
 // HandleVerification handles GET requests for subscription verification
 func (h *WebhookHandler) HandleVerification(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -33,8 +42,8 @@ func (h *WebhookHandler) HandleVerification(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Extract client_id from query parameter
-	clientID := r.URL.Query().Get("client_id")
+	// Extract client_id from request context
+	clientID := extractClientFromContext(r)
 	if clientID == "" {
 		h.logger.Warn("Missing client_id in webhook verification")
 		http.Error(w, "Missing client_id parameter", http.StatusBadRequest)
@@ -89,8 +98,8 @@ func (h *WebhookHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract client_id from query parameter
-	clientID := r.URL.Query().Get("client_id")
+	// Extract client_id from request context
+	clientID := extractClientFromContext(r)
 	if clientID == "" {
 		h.logger.Warn("Missing client_id in webhook event")
 		http.Error(w, "Missing client_id parameter", http.StatusBadRequest)

@@ -17,10 +17,16 @@ See .env.example for configuration.
 OAuth callback provided to Strava as `redirect_uri`. Handles setting up the
 user.
 
-### `/webhook-callback`
+### `/webhook-callback/{client}`
 
-Webhook callback registered with Strava. The callback must be registered using
-the configured `VERIFY_TOKEN` (as `--create-strava-subscription` does).
+Webhook callback registered with Strava. The `{client}` path parameter specifies
+which Strava client (e.g., `primary` or `secondary`) the webhook is for. The
+callback must be registered using the configured `VERIFY_TOKEN` for that client
+(as `--create-strava-subscription` does).
+
+Example URLs:
+- `/webhook-callback/primary`
+- `/webhook-callback/secondary`
 
 ### `/events`
 

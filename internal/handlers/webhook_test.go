@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,7 +21,13 @@ func setupWebhookTest(t *testing.T) (*WebhookHandler, *database.DB) {
 	}
 
 	cfg := &config.Config{
-		StravaVerifyToken: "test_verify_token",
+		StravaClients: map[string]*config.StravaClientConfig{
+			"primary": {
+				ClientID:     "test_client_id",
+				ClientSecret: "test_secret",
+				VerifyToken:  "test_verify_token",
+			},
+		},
 	}
 
 	handler := NewWebhookHandler(db, cfg)
@@ -27,11 +35,18 @@ func setupWebhookTest(t *testing.T) (*WebhookHandler, *database.DB) {
 	return handler, db
 }
 
+// newRequestWithClient creates a test request with client ID in context
+func newRequestWithClient(method, path string, body io.Reader, client string) *http.Request {
+	req := httptest.NewRequest(method, path, body)
+	ctx := context.WithValue(req.Context(), "client", client)
+	return req.WithContext(ctx)
+}
+
 func TestHandleVerification_Success(t *testing.T) {
 	handler, db := setupWebhookTest(t)
 	defer db.Close()
 
-	req := httptest.NewRequest(http.MethodGet, "/webhook-callback?hub.mode=subscribe&hub.challenge=test_challenge&hub.verify_token=test_verify_token", nil)
+	req := newRequestWithClient(http.MethodGet, "/webhook-callback/primary?hub.mode=subscribe&hub.challenge=test_challenge&hub.verify_token=test_verify_token", nil, "primary")
 	w := httptest.NewRecorder()
 
 	handler.HandleVerification(w, req)
@@ -54,7 +69,7 @@ func TestHandleVerification_InvalidToken(t *testing.T) {
 	handler, db := setupWebhookTest(t)
 	defer db.Close()
 
-	req := httptest.NewRequest(http.MethodGet, "/webhook-callback?hub.mode=subscribe&hub.challenge=test_challenge&hub.verify_token=wrong_token", nil)
+	req := newRequestWithClient(http.MethodGet, "/webhook-callback/primary?hub.mode=subscribe&hub.challenge=test_challenge&hub.verify_token=wrong_token", nil, "primary")
 	w := httptest.NewRecorder()
 
 	handler.HandleVerification(w, req)
@@ -68,7 +83,7 @@ func TestHandleVerification_WrongMethod(t *testing.T) {
 	handler, db := setupWebhookTest(t)
 	defer db.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/webhook-callback", nil)
+	req := newRequestWithClient(http.MethodPost, "/webhook-callback/primary", nil, "primary")
 	w := httptest.NewRecorder()
 
 	handler.HandleVerification(w, req)
@@ -91,7 +106,7 @@ func TestHandleEvent_Success(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(webhookData)
-	req := httptest.NewRequest(http.MethodPost, "/webhook-callback", bytes.NewReader(body))
+	req := newRequestWithClient(http.MethodPost, "/webhook-callback/primary", bytes.NewReader(body), "primary")
 	w := httptest.NewRecorder()
 
 	handler.HandleEvent(w, req)
@@ -134,7 +149,7 @@ func TestHandleEvent_InvalidJSON(t *testing.T) {
 	handler, db := setupWebhookTest(t)
 	defer db.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/webhook-callback", bytes.NewReader([]byte("invalid json")))
+	req := newRequestWithClient(http.MethodPost, "/webhook-callback/primary", bytes.NewReader([]byte("invalid json")), "primary")
 	w := httptest.NewRecorder()
 
 	handler.HandleEvent(w, req)
@@ -158,7 +173,7 @@ func TestHandleEvent_WrongMethod(t *testing.T) {
 	handler, db := setupWebhookTest(t)
 	defer db.Close()
 
-	req := httptest.NewRequest(http.MethodGet, "/webhook-callback", nil)
+	req := newRequestWithClient(http.MethodGet, "/webhook-callback/primary", nil, "primary")
 	w := httptest.NewRecorder()
 
 	handler.HandleEvent(w, req)
