@@ -67,6 +67,9 @@ const (
 	DBOpDeleteAthleteEvents        = "delete_athlete_events"
 	DBOpGetAthlete                 = "get_athlete"
 	DBOpUpsertAthlete              = "upsert_athlete"
+	DBOpGetCircuitBreakerState     = "get_circuit_breaker_state"
+	DBOpOpenCircuitBreaker         = "open_circuit_breaker"
+	DBOpTransitionCircuitBreaker   = "transition_circuit_breaker"
 )
 
 // HTTP Metrics
@@ -248,5 +251,45 @@ var (
 			Help:    "Number of activities synced per sync_all_activities job",
 			Buckets: []float64{0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000},
 		},
+	)
+)
+
+// Circuit Breaker Metrics
+var (
+	CircuitBreakerState = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "circuit_breaker_state",
+			Help: "Circuit breaker state (0=closed, 1=half_open, 2=open)",
+		},
+		[]string{"breaker_type"},
+	)
+
+	CircuitBreakerOpened = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "circuit_breaker_opened_total",
+			Help: "Total number of times circuit breaker opened due to rate limits",
+		},
+	)
+
+	CircuitBreakerRecovered = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "circuit_breaker_recovered_total",
+			Help: "Total number of times circuit breaker recovered to closed state",
+		},
+	)
+
+	BackfillJobsThrottled = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "backfill_jobs_throttled_total",
+			Help: "Total number of backfill jobs skipped due to proactive throttling",
+		},
+	)
+
+	RateLimitBudgetAvailable = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "rate_limit_budget_available",
+			Help: "Available rate limit budget after webhook reserve",
+		},
+		[]string{"limit_type"},
 	)
 )

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"plantopo-strava-sync/internal/config"
 	"plantopo-strava-sync/internal/database"
 	"plantopo-strava-sync/internal/metrics"
 	"plantopo-strava-sync/internal/strava"
@@ -17,15 +18,17 @@ import (
 type Worker struct {
 	db           *database.DB
 	stravaClient *strava.Client
+	config       *config.Config
 	logger       *slog.Logger
 	pollInterval time.Duration
 }
 
 // NewWorker creates a new webhook worker
-func NewWorker(db *database.DB, stravaClient *strava.Client) *Worker {
+func NewWorker(db *database.DB, stravaClient *strava.Client, cfg *config.Config) *Worker {
 	return &Worker{
 		db:           db,
 		stravaClient: stravaClient,
+		config:       cfg,
 		logger:       slog.Default(),
 		pollInterval: 500 * time.Millisecond,
 	}
@@ -33,7 +36,7 @@ func NewWorker(db *database.DB, stravaClient *strava.Client) *Worker {
 
 // Start begins processing both webhooks and sync jobs from their respective queues
 func (w *Worker) Start(ctx context.Context) error {
-	w.logger.Info("Starting worker (webhooks + sync jobs)")
+	w.logger.Info("Starting worker (webhooks + sync jobs + circuit breaker)")
 	metrics.WorkerActive.Set(1)
 	defer metrics.WorkerActive.Set(0)
 
@@ -43,7 +46,20 @@ func (w *Worker) Start(ctx context.Context) error {
 			w.logger.Info("Stopping worker")
 			return ctx.Err()
 		default:
-			// Try to claim a webhook first (prioritize real-time webhooks)
+			// 1. Check circuit breaker state
+			circuitState, err := w.db.GetCircuitBreakerState()
+			if err != nil {
+				w.logger.Error("Failed to check circuit breaker", "error", err)
+				time.Sleep(w.pollInterval)
+				continue
+			}
+
+			// 2. Handle circuit state transitions
+			if err := w.handleCircuitBreakerTransitions(circuitState); err != nil {
+				w.logger.Error("Failed to handle circuit transitions", "error", err)
+			}
+
+			// 3. Always prioritize webhooks (real-time events)
 			webhook, err := w.db.ClaimWebhook()
 			if err != nil {
 				w.logger.Error("Failed to claim webhook", "error", err)
@@ -52,13 +68,37 @@ func (w *Worker) Start(ctx context.Context) error {
 			}
 
 			if webhook != nil {
-				// Process the webhook
 				metrics.WorkerPollCyclesTotal.WithLabelValues(metrics.OutcomeWebhookFound).Inc()
 				w.processWebhook(webhook)
+
+				// Increment successes if in half_open state
+				if circuitState.State == "half_open" {
+					w.db.IncrementCircuitBreakerSuccesses()
+				}
 				continue
 			}
 
-			// No webhook available, try to claim a sync job
+			// 4. Circuit breaker: Skip backfill if circuit is open
+			if circuitState.State == "open" {
+				metrics.WorkerPollCyclesTotal.WithLabelValues("circuit_open").Inc()
+				time.Sleep(w.pollInterval)
+				continue
+			}
+
+			// 5. Proactive throttling: Check budget before claiming sync job
+			allowed, reason := w.stravaClient.CanProcessBackfillJob(
+				w.config.RateLimitWebhookReservePercent,
+				w.config.RateLimitThrottleThreshold,
+			)
+			if !allowed {
+				w.logger.Debug("Backfill throttled", "reason", reason)
+				metrics.WorkerPollCyclesTotal.WithLabelValues("throttled").Inc()
+				metrics.BackfillJobsThrottled.Inc()
+				time.Sleep(w.pollInterval)
+				continue
+			}
+
+			// 6. Claim and process sync job
 			syncJob, err := w.db.ClaimSyncJob()
 			if err != nil {
 				w.logger.Error("Failed to claim sync job", "error", err)
@@ -67,17 +107,86 @@ func (w *Worker) Start(ctx context.Context) error {
 			}
 
 			if syncJob != nil {
-				// Process the sync job
 				metrics.WorkerPollCyclesTotal.WithLabelValues(metrics.OutcomeSyncJobFound).Inc()
 				w.processSyncJob(syncJob)
+
+				// Increment successes if in half_open state
+				if circuitState.State == "half_open" {
+					w.db.IncrementCircuitBreakerSuccesses()
+				}
 				continue
 			}
 
-			// Nothing to process, wait before trying again
+			// Nothing to process
 			metrics.WorkerPollCyclesTotal.WithLabelValues(metrics.OutcomeIdle).Inc()
 			time.Sleep(w.pollInterval)
 		}
 	}
+}
+
+// handleCircuitBreakerTransitions manages state transitions for the circuit breaker
+func (w *Worker) handleCircuitBreakerTransitions(state *database.CircuitBreakerState) error {
+	now := time.Now()
+
+	switch state.State {
+	case "open":
+		// Check if cooldown period has elapsed
+		if state.ClosesAt != nil && now.After(*state.ClosesAt) {
+			w.logger.Info("Circuit breaker cooldown elapsed, transitioning to half_open",
+				"cooldown_duration", now.Sub(*state.OpenedAt))
+			if err := w.db.TransitionCircuitBreakerToHalfOpen(); err != nil {
+				return fmt.Errorf("failed to transition to half_open: %w", err)
+			}
+			metrics.CircuitBreakerState.WithLabelValues("rate_limit").Set(1) // half_open = 1
+		}
+
+	case "half_open":
+		// After N consecutive successes, recover to closed
+		if state.ConsecutiveSuccesses >= w.config.RateLimitCircuitRecoveryCount {
+			w.logger.Info("Circuit breaker recovered after consecutive successes",
+				"successes", state.ConsecutiveSuccesses)
+			if err := w.db.TransitionCircuitBreakerToClosed(); err != nil {
+				return fmt.Errorf("failed to transition to closed: %w", err)
+			}
+			metrics.CircuitBreakerState.WithLabelValues("rate_limit").Set(0) // closed = 0
+			metrics.CircuitBreakerRecovered.Inc()
+		}
+	}
+
+	return nil
+}
+
+// handle429Error processes rate limit errors by opening the circuit breaker
+func (w *Worker) handle429Error(jobType string) error {
+	w.logger.Warn("Rate limit hit (429), opening circuit breaker", "job_type", jobType)
+
+	// Get current rate limit state from client
+	_, _, _, _,
+		read15minUsage, read15minLimit,
+		readDailyUsage, readDailyLimit := w.stravaClient.GetRateLimits()
+
+	remaining15min := read15minLimit - read15minUsage
+	remainingDaily := readDailyLimit - readDailyUsage
+
+	// Calculate cooldown period
+	cooldown := strava.CalculateCooldown(remaining15min, read15minLimit)
+
+	// Open circuit breaker
+	if err := w.db.OpenCircuitBreaker(remaining15min, remainingDaily, cooldown); err != nil {
+		w.logger.Error("Failed to open circuit breaker", "error", err)
+		return err
+	}
+
+	metrics.CircuitBreakerOpened.Inc()
+	metrics.CircuitBreakerState.WithLabelValues("rate_limit").Set(2) // open = 2
+
+	w.logger.Info("Circuit breaker opened",
+		"cooldown_duration", cooldown,
+		"remaining_15min", remaining15min,
+		"remaining_daily", remainingDaily,
+		"closes_at", time.Now().Add(cooldown))
+
+	return nil
 }
 
 // processWebhook handles a single webhook item
@@ -208,6 +317,7 @@ func (w *Worker) listActivities(athleteID int64) error {
 		if err != nil {
 			// Check if it's a rate limit error
 			if strava.IsTooManyRequests(err) {
+				w.handle429Error("list_activities")
 				return fmt.Errorf("rate limited during list_activities: %w", err)
 			}
 			// Check if it's an auth error
@@ -389,6 +499,7 @@ func (w *Worker) processWebhookActivity(athleteID, activityID int64, aspectType 
 			return nil // Don't retry unauthorized
 		}
 		if strava.IsTooManyRequests(err) {
+			w.handle429Error("webhook_activity")
 			return fmt.Errorf("rate limited: %w", err) // Retry rate limits
 		}
 		return fmt.Errorf("failed to get activity: %w", err)
@@ -428,6 +539,7 @@ func (w *Worker) syncActivity(athleteID, activityID int64) error {
 			return nil // Don't retry unauthorized
 		}
 		if strava.IsTooManyRequests(err) {
+			w.handle429Error("sync_activity")
 			return fmt.Errorf("rate limited: %w", err) // Retry rate limits
 		}
 		return fmt.Errorf("failed to get activity: %w", err)

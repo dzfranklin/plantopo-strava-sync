@@ -38,6 +38,11 @@ type Config struct {
 	MetricsEnabled bool
 	MetricsHost    string
 	MetricsPort    int
+
+	// Rate limiting configuration
+	RateLimitWebhookReservePercent float64 // Percentage of quota reserved for webhooks (0.0-1.0)
+	RateLimitThrottleThreshold     float64 // Usage threshold to start throttling backfill (0.0-1.0)
+	RateLimitCircuitRecoveryCount  int     // Successful requests before circuit closes
 }
 
 // Load reads configuration from environment variables
@@ -54,6 +59,11 @@ func Load() (*Config, error) {
 		MetricsEnabled: getEnvBool("METRICS_ENABLED", true),
 		MetricsHost:    getEnv("METRICS_HOST", "127.0.0.1"),
 		MetricsPort:    getEnvInt("METRICS_PORT", 4102),
+
+		// Rate limiting defaults
+		RateLimitWebhookReservePercent: getEnvFloat("RATE_LIMIT_WEBHOOK_RESERVE_PCT", 0.20),
+		RateLimitThrottleThreshold:     getEnvFloat("RATE_LIMIT_THROTTLE_THRESHOLD", 0.70),
+		RateLimitCircuitRecoveryCount:  getEnvInt("RATE_LIMIT_CIRCUIT_RECOVERY_COUNT", 3),
 
 		// Initialize Strava clients map
 		StravaClients: make(map[string]*StravaClientConfig),
@@ -163,6 +173,21 @@ func getEnvBool(key string, defaultValue bool) bool {
 	}
 
 	value, err := strconv.ParseBool(valueStr)
+	if err != nil {
+		return defaultValue
+	}
+
+	return value
+}
+
+// getEnvFloat gets a float environment variable or returns a default value
+func getEnvFloat(key string, defaultValue float64) float64 {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+
+	value, err := strconv.ParseFloat(valueStr, 64)
 	if err != nil {
 		return defaultValue
 	}

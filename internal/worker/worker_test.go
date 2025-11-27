@@ -31,11 +31,14 @@ func setupWorkerTest(t *testing.T) (*Worker, *database.DB) {
 				VerifyToken:  "test_verify_token",
 			},
 		},
-		InternalAPIKey: "test_api_key",
+		InternalAPIKey:                 "test_api_key",
+		RateLimitWebhookReservePercent: 0.20,
+		RateLimitThrottleThreshold:     0.70,
+		RateLimitCircuitRecoveryCount:  3,
 	}
 
 	stravaClient := strava.NewClient(cfg, db)
-	worker := NewWorker(db, stravaClient)
+	worker := NewWorker(db, stravaClient, cfg)
 
 	return worker, db
 }

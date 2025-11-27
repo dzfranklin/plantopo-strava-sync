@@ -279,7 +279,7 @@ func runServer() {
 	}
 
 	// Start webhook worker in background
-	workerInstance := worker.NewWorker(db, stravaClient)
+	workerInstance := worker.NewWorker(db, stravaClient, cfg)
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 

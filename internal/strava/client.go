@@ -349,6 +349,27 @@ func (c *Client) updateRateLimits(resp *http.Response) {
 			"read_daily_pct", fmt.Sprintf("%.1f%%", readPctDaily),
 		)
 	}
+
+	// Update budget availability metrics
+	webhookReservePercent := c.config.RateLimitWebhookReservePercent
+	read15minRemaining := c.rateLimits.readLimit15Min - c.rateLimits.readUsage15Min
+	readDailyRemaining := c.rateLimits.readLimitDaily - c.rateLimits.readUsageDaily
+
+	webhookReserve15min := int(float64(c.rateLimits.readLimit15Min) * webhookReservePercent)
+	webhookReserveDaily := int(float64(c.rateLimits.readLimitDaily) * webhookReservePercent)
+
+	available15min := read15minRemaining - webhookReserve15min
+	availableDaily := readDailyRemaining - webhookReserveDaily
+
+	if available15min < 0 {
+		available15min = 0
+	}
+	if availableDaily < 0 {
+		availableDaily = 0
+	}
+
+	metrics.RateLimitBudgetAvailable.WithLabelValues("read_15min").Set(float64(available15min))
+	metrics.RateLimitBudgetAvailable.WithLabelValues("read_daily").Set(float64(availableDaily))
 }
 
 // GetRateLimits returns current rate limit information
@@ -391,4 +412,89 @@ func IsUnauthorized(err error) bool {
 func IsTooManyRequests(err error) bool {
 	httpErr, ok := err.(*HTTPError)
 	return ok && httpErr.StatusCode == http.StatusTooManyRequests
+}
+
+// CalculateCooldown determines how long to wait before resuming backfill operations
+// based on remaining quota. Uses conservative approach to avoid repeated 429s.
+func CalculateCooldown(remaining15min, limit15min int) time.Duration {
+	if limit15min == 0 {
+		return 15 * time.Minute // Safe default
+	}
+
+	usagePercent := float64(limit15min-remaining15min) / float64(limit15min)
+
+	if usagePercent >= 0.95 {
+		// Nearly exhausted: wait full reset period
+		return 15 * time.Minute
+	} else if usagePercent >= 0.80 {
+		// Mostly exhausted: wait for partial reset
+		return 10 * time.Minute
+	} else {
+		// Partial exhaustion: brief cooldown
+		return 5 * time.Minute
+	}
+}
+
+// CanProcessBackfillJob checks if there's sufficient rate limit budget to process
+// a backfill job while reserving quota for incoming webhooks.
+// Returns (allowed, reason) where reason explains why if not allowed.
+func (c *Client) CanProcessBackfillJob(webhookReservePercent, throttleThreshold float64) (bool, string) {
+	c.rateLimits.mu.RLock()
+	defer c.rateLimits.mu.RUnlock()
+
+	read15minRemaining := c.rateLimits.readLimit15Min - c.rateLimits.readUsage15Min
+	readDailyRemaining := c.rateLimits.readLimitDaily - c.rateLimits.readUsageDaily
+
+	// Reserve budget for real-time webhooks
+	webhookReserve15min := int(float64(c.rateLimits.readLimit15Min) * webhookReservePercent)
+	webhookReserveDaily := int(float64(c.rateLimits.readLimitDaily) * webhookReservePercent)
+
+	available15min := read15minRemaining - webhookReserve15min
+	availableDaily := readDailyRemaining - webhookReserveDaily
+
+	if available15min <= 0 {
+		return false, "insufficient 15-minute read quota (webhook reserve)"
+	}
+	if availableDaily <= 0 {
+		return false, "insufficient daily read quota (webhook reserve)"
+	}
+
+	// Additional throttling at configurable threshold
+	threshold15min := int(float64(c.rateLimits.readLimit15Min) * (1.0 - throttleThreshold))
+	thresholdDaily := int(float64(c.rateLimits.readLimitDaily) * (1.0 - throttleThreshold))
+
+	if read15minRemaining < threshold15min {
+		usagePct := (1.0 - float64(read15minRemaining)/float64(c.rateLimits.readLimit15Min)) * 100
+		return false, fmt.Sprintf("approaching 15-minute rate limit (%.0f%% used)", usagePct)
+	}
+	if readDailyRemaining < thresholdDaily {
+		usagePct := (1.0 - float64(readDailyRemaining)/float64(c.rateLimits.readLimitDaily)) * 100
+		return false, fmt.Sprintf("approaching daily rate limit (%.0f%% used)", usagePct)
+	}
+
+	return true, ""
+}
+
+// GetRateLimitBudget returns available budget after webhook reserve for metrics
+func (c *Client) GetRateLimitBudget(webhookReservePercent float64) (available15min, availableDaily int) {
+	c.rateLimits.mu.RLock()
+	defer c.rateLimits.mu.RUnlock()
+
+	read15minRemaining := c.rateLimits.readLimit15Min - c.rateLimits.readUsage15Min
+	readDailyRemaining := c.rateLimits.readLimitDaily - c.rateLimits.readUsageDaily
+
+	webhookReserve15min := int(float64(c.rateLimits.readLimit15Min) * webhookReservePercent)
+	webhookReserveDaily := int(float64(c.rateLimits.readLimitDaily) * webhookReservePercent)
+
+	available15min = read15minRemaining - webhookReserve15min
+	availableDaily = readDailyRemaining - webhookReserveDaily
+
+	if available15min < 0 {
+		available15min = 0
+	}
+	if availableDaily < 0 {
+		availableDaily = 0
+	}
+
+	return available15min, availableDaily
 }

@@ -82,3 +82,21 @@ CREATE INDEX IF NOT EXISTS idx_events_activity_id ON events(activity_id) WHERE a
 
 -- Composite index for event type filtering with pagination
 CREATE INDEX IF NOT EXISTS idx_events_type_id ON events(event_type, event_id);
+
+-- Circuit breaker for rate limit management
+-- Singleton table: only ever contains one row (id = 1)
+CREATE TABLE IF NOT EXISTS rate_limit_circuit_breaker (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    state TEXT NOT NULL CHECK(state IN ('closed', 'open', 'half_open')),
+    opened_at INTEGER,
+    closes_at INTEGER,
+    last_429_at INTEGER,
+    remaining_15min INTEGER,
+    remaining_daily INTEGER,
+    consecutive_successes INTEGER DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+-- Initialize with closed state
+INSERT OR IGNORE INTO rate_limit_circuit_breaker (id, state)
+VALUES (1, 'closed');
