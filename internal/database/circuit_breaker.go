@@ -2,11 +2,13 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"plantopo-strava-sync/internal/metrics"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type CircuitBreakerState struct {
@@ -42,7 +44,7 @@ func (d *DB) GetCircuitBreakerState() (*CircuitBreakerState, error) {
 		&state.ConsecutiveSuccesses, &updatedAt,
 	)
 
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return &CircuitBreakerState{State: "closed", UpdatedAt: time.Now()}, nil
 	}
 	if err != nil {

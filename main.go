@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -285,7 +286,7 @@ func runServer() {
 
 	go func() {
 		logger.Info("Starting webhook worker")
-		if err := workerInstance.Start(workerCtx); err != nil && err != context.Canceled {
+		if err := workerInstance.Start(workerCtx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("Webhook worker failed", "error", err)
 		}
 	}()
@@ -312,7 +313,7 @@ func runServer() {
 
 		go func() {
 			logger.Info("Metrics server listening", "addr", metricsAddr)
-			if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error("Metrics server failed", "error", err)
 			}
 		}()
@@ -321,7 +322,7 @@ func runServer() {
 	// Start HTTP server in background
 	go func() {
 		logger.Info("HTTP server listening", "addr", addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("HTTP server failed", "error", err)
 			os.Exit(1)
 		}

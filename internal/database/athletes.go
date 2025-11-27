@@ -3,17 +3,19 @@ package database
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"plantopo-strava-sync/internal/metrics"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Athlete represents an athlete's authentication data in the database
 type Athlete struct {
 	AthleteID      int64
-	ClientID       string          // Strava client identifier (primary/secondary)
+	ClientID       string // Strava client identifier (primary/secondary)
 	AccessToken    string
 	RefreshToken   string
 	TokenExpiresAt time.Time
@@ -83,7 +85,7 @@ func (d *DB) GetAthlete(athleteID int64) (*Athlete, error) {
 		&updatedAt,
 	)
 
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil // Athlete not found
 	}
 	if err != nil {
