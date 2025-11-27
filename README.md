@@ -10,7 +10,15 @@ with `plantopo-strava-sync --list-strava-subscriptions`,
 
 See .env.example for configuration.
 
-## API
+## Routes
+
+### `/oauth-start`
+
+Initiates the OAuth flow by redirecting to Strava
+
+Query Parameters:
+
+- client_id (optional):  `primary` or `secondary`
 
 ### `/oauth-callback`
 
@@ -20,13 +28,13 @@ user.
 ### `/webhook-callback/{client}`
 
 Webhook callback registered with Strava. The `{client}` path parameter specifies
-which Strava client (e.g., `primary` or `secondary`) the webhook is for. The
+which Strava client the webhook is for. The
 callback must be registered using the configured `VERIFY_TOKEN` for that client
 (as `--create-strava-subscription` does).
 
-Example URLs:
-- `/webhook-callback/primary`
-- `/webhook-callback/secondary`
+URL Parameters: client (`primary` or `secondary`)
+
+Query Parameters (see Strava documentation): code, state, error
 
 ### `/events`
 
@@ -39,7 +47,7 @@ Events do not appear until they have been hydrated.
 
 Authorization: Provide the header `Authorization: Bearer <INTERNAL_API_KEY>`
 
-Parameters:
+Query Parameters:
 - cursor (int, optional): The ID of the last event seen.
 - long_poll (bool, option): If true then the server may wait to reply until
   events are available. After a period the server will timeout and reply with
@@ -89,6 +97,15 @@ Response
   ]
 }
 ```
+
+### /health
+
+Returns HTTP Status 200 if the server is running.
+
+## Metrics Server
+
+Provides metrics at `/metrics`
+
 
 ## Resources
 
