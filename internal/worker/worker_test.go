@@ -23,8 +23,15 @@ func setupWorkerTest(t *testing.T) (*Worker, *database.DB) {
 	}
 
 	cfg := &config.Config{
-		StravaClientID:     "test_client_id",
-		StravaClientSecret: "test_client_secret",
+		Domain: "example.com",
+		StravaClients: map[string]*config.StravaClientConfig{
+			"primary": {
+				ClientID:     "test_client_id",
+				ClientSecret: "test_client_secret",
+				VerifyToken:  "test_verify_token",
+			},
+		},
+		InternalAPIKey: "test_api_key",
 	}
 
 	stravaClient := strava.NewClient(cfg, db)
@@ -289,6 +296,7 @@ func TestProcessWebhookActivity_Integration(t *testing.T) {
 	// Insert test athlete with valid token
 	athlete := &database.Athlete{
 		AthleteID:      athleteID,
+		ClientID:       "primary",
 		AccessToken:    "valid_token",
 		RefreshToken:   "refresh_token",
 		TokenExpiresAt: time.Now().Add(1 * time.Hour),
@@ -386,6 +394,7 @@ func TestSyncAllActivities_Integration(t *testing.T) {
 	// Insert test athlete with valid token
 	athlete := &database.Athlete{
 		AthleteID:      athleteID,
+		ClientID:       "primary",
 		AccessToken:    "valid_token",
 		RefreshToken:   "refresh_token",
 		TokenExpiresAt: time.Now().Add(1 * time.Hour),

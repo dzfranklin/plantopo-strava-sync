@@ -24,8 +24,15 @@ func setupOAuthTest(t *testing.T) (*Manager, *database.DB) {
 	}
 
 	cfg := &config.Config{
-		StravaClientID:     "test_client_id",
-		StravaClientSecret: "test_client_secret",
+		Domain: "example.com",
+		StravaClients: map[string]*config.StravaClientConfig{
+			"primary": {
+				ClientID:     "test_client_id",
+				ClientSecret: "test_client_secret",
+				VerifyToken:  "test_verify_token",
+			},
+		},
+		InternalAPIKey: "test_api_key",
 	}
 
 	stravaClient := strava.NewClient(cfg, db)
@@ -39,7 +46,8 @@ func TestGenerateAuthURL(t *testing.T) {
 	defer db.Close()
 
 	redirectURI := "http://localhost:4101/oauth-callback"
-	authURL, state, err := manager.GenerateAuthURL(redirectURI)
+	clientID := "primary"
+	authURL, state, err := manager.GenerateAuthURL(redirectURI, clientID)
 
 	if err != nil {
 		t.Fatalf("Failed to generate auth URL: %v", err)
@@ -89,18 +97,23 @@ func TestValidateState_Valid(t *testing.T) {
 	defer db.Close()
 
 	// Generate a state
-	_, state, err := manager.GenerateAuthURL("http://localhost:4101/oauth-callback")
+	_, state, err := manager.GenerateAuthURL("http://localhost:4101/oauth-callback", "primary")
 	if err != nil {
 		t.Fatalf("Failed to generate auth URL: %v", err)
 	}
 
 	// Validate it
-	if !manager.validateState(state) {
+	clientID, valid := manager.validateState(state)
+	if !valid {
 		t.Error("Expected state to be valid")
+	}
+	if clientID != "primary" {
+		t.Errorf("Expected clientID='primary', got '%s'", clientID)
 	}
 
 	// State should be removed after first use
-	if manager.validateState(state) {
+	_, valid = manager.validateState(state)
+	if valid {
 		t.Error("Expected state to be invalid after first use")
 	}
 }
@@ -110,7 +123,8 @@ func TestValidateState_Invalid(t *testing.T) {
 	defer db.Close()
 
 	// Try to validate a non-existent state
-	if manager.validateState("invalid_state") {
+	_, valid := manager.validateState("invalid_state")
+	if valid {
 		t.Error("Expected invalid state to fail validation")
 	}
 }
@@ -122,11 +136,15 @@ func TestValidateState_Expired(t *testing.T) {
 	// Manually insert an expired state
 	state := "expired_state"
 	manager.states.mu.Lock()
-	manager.states.states[state] = time.Now().Add(-1 * time.Minute)
+	manager.states.states[state] = &stateEntry{
+		clientID: "primary",
+		expiry:   time.Now().Add(-1 * time.Minute),
+	}
 	manager.states.mu.Unlock()
 
 	// Should be rejected
-	if manager.validateState(state) {
+	_, valid := manager.validateState(state)
+	if valid {
 		t.Error("Expected expired state to fail validation")
 	}
 
@@ -191,15 +209,19 @@ func TestHandleCallback_Integration(t *testing.T) {
 	stravaClient.SetTokenURL(tokenServer.URL)
 
 	// Generate a valid state
-	_, state, err := manager.GenerateAuthURL("http://localhost:4101/oauth-callback")
+	_, state, err := manager.GenerateAuthURL("http://localhost:4101/oauth-callback", "primary")
 	if err != nil {
 		t.Fatalf("Failed to generate auth URL: %v", err)
 	}
 
 	// Test OAuth callback
-	athleteID, err := manager.HandleCallback("test_auth_code", state)
+	athleteID, clientID, err := manager.HandleCallback("test_auth_code", state)
 	if err != nil {
 		t.Fatalf("Failed to handle callback: %v", err)
+	}
+
+	if clientID != "primary" {
+		t.Errorf("Expected clientID='primary', got '%s'", clientID)
 	}
 
 	if athleteID != 12345 {

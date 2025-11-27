@@ -24,8 +24,15 @@ func setupTestClient(t *testing.T) (*Client, *database.DB, *httptest.Server) {
 	server := httptest.NewServer(mux)
 
 	cfg := &config.Config{
-		StravaClientID:     "test_client_id",
-		StravaClientSecret: "test_client_secret",
+		Domain: "example.com",
+		StravaClients: map[string]*config.StravaClientConfig{
+			"primary": {
+				ClientID:     "test_client_id",
+				ClientSecret: "test_client_secret",
+				VerifyToken:  "test_verify_token",
+			},
+		},
+		InternalAPIKey: "test_api_key",
 	}
 
 	client := NewClient(cfg, db)
@@ -83,15 +90,22 @@ func TestExchangeCode(t *testing.T) {
 
 	// Create client with test configuration
 	cfg := &config.Config{
-		StravaClientID:     "test_client_id",
-		StravaClientSecret: "test_client_secret",
+		Domain: "example.com",
+		StravaClients: map[string]*config.StravaClientConfig{
+			"primary": {
+				ClientID:     "test_client_id",
+				ClientSecret: "test_client_secret",
+				VerifyToken:  "test_verify_token",
+			},
+		},
+		InternalAPIKey: "test_api_key",
 	}
 
 	client := NewClient(cfg, db)
 	client.SetTokenURL(tokenServer.URL)
 
 	// Test token exchange
-	tokenResp, err := client.ExchangeCode("test_code")
+	tokenResp, err := client.ExchangeCode("test_code", "primary")
 	if err != nil {
 		t.Fatalf("Failed to exchange code: %v", err)
 	}
@@ -117,6 +131,7 @@ func TestEnsureValidToken_TokenValid(t *testing.T) {
 	// Insert athlete with valid token
 	athlete := &database.Athlete{
 		AthleteID:      12345,
+		ClientID:       "primary",
 		AccessToken:    "valid_token",
 		RefreshToken:   "refresh_token",
 		TokenExpiresAt: time.Now().Add(1 * time.Hour), // Valid for 1 hour
@@ -149,6 +164,7 @@ func TestRateLimitTracking(t *testing.T) {
 	// Insert athlete
 	athlete := &database.Athlete{
 		AthleteID:      12345,
+		ClientID:       "primary",
 		AccessToken:    "valid_token",
 		RefreshToken:   "refresh_token",
 		TokenExpiresAt: time.Now().Add(1 * time.Hour),

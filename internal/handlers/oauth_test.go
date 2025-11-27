@@ -19,6 +19,7 @@ func setupOAuthHandlerTest(t *testing.T) (*OAuthHandler, *database.DB, *oauth.Ma
 	}
 
 	cfg := &config.Config{
+		Domain: "localhost:4101",
 		StravaClients: map[string]*config.StravaClientConfig{
 			"primary": {
 				ClientID:     "test_client_id",
@@ -26,6 +27,7 @@ func setupOAuthHandlerTest(t *testing.T) (*OAuthHandler, *database.DB, *oauth.Ma
 				VerifyToken:  "test_verify_token",
 			},
 		},
+		InternalAPIKey: "test_api_key",
 	}
 
 	stravaClient := strava.NewClient(cfg, db)
@@ -61,7 +63,7 @@ func TestHandleAuthStart_Success(t *testing.T) {
 		t.Error("Expected client_id in redirect URL")
 	}
 
-	if !strings.Contains(location, "redirect_uri=http%3A%2F%2Flocalhost%3A4101%2Foauth-callback") {
+	if !strings.Contains(location, "redirect_uri=https%3A%2F%2Flocalhost%3A4101%2Foauth-callback") {
 		t.Error("Expected redirect_uri in redirect URL")
 	}
 

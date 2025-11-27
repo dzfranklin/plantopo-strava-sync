@@ -25,9 +25,10 @@ func TestLoad(t *testing.T) {
 
 	t.Run("WithAllRequiredVariables", func(t *testing.T) {
 		os.Clearenv()
-		os.Setenv("STRAVA_CLIENT_ID", "test_client_id")
-		os.Setenv("STRAVA_CLIENT_SECRET", "test_client_secret")
-		os.Setenv("STRAVA_VERIFY_TOKEN", "test_verify_token")
+		os.Setenv("DOMAIN", "example.com")
+		os.Setenv("STRAVA_PRIMARY_CLIENT_ID", "test_client_id")
+		os.Setenv("STRAVA_PRIMARY_CLIENT_SECRET", "test_client_secret")
+		os.Setenv("STRAVA_PRIMARY_VERIFY_TOKEN", "test_verify_token")
 		os.Setenv("INTERNAL_API_KEY", "test_api_key")
 
 		cfg, err := Load()
@@ -35,22 +36,27 @@ func TestLoad(t *testing.T) {
 			t.Fatalf("Expected no error, got %v", err)
 		}
 
-		if cfg.StravaClientID != "test_client_id" {
-			t.Errorf("Expected StravaClientID='test_client_id', got '%s'", cfg.StravaClientID)
+		primaryClient, err := cfg.GetClient("primary")
+		if err != nil {
+			t.Fatalf("Expected primary client to exist, got error: %v", err)
 		}
-		if cfg.StravaClientSecret != "test_client_secret" {
-			t.Errorf("Expected StravaClientSecret='test_client_secret', got '%s'", cfg.StravaClientSecret)
+
+		if primaryClient.ClientID != "test_client_id" {
+			t.Errorf("Expected ClientID='test_client_id', got '%s'", primaryClient.ClientID)
 		}
-		if cfg.StravaVerifyToken != "test_verify_token" {
-			t.Errorf("Expected StravaVerifyToken='test_verify_token', got '%s'", cfg.StravaVerifyToken)
+		if primaryClient.ClientSecret != "test_client_secret" {
+			t.Errorf("Expected ClientSecret='test_client_secret', got '%s'", primaryClient.ClientSecret)
+		}
+		if primaryClient.VerifyToken != "test_verify_token" {
+			t.Errorf("Expected VerifyToken='test_verify_token', got '%s'", primaryClient.VerifyToken)
 		}
 		if cfg.InternalAPIKey != "test_api_key" {
 			t.Errorf("Expected InternalAPIKey='test_api_key', got '%s'", cfg.InternalAPIKey)
 		}
 
 		// Test defaults
-		if cfg.Host != "localhost" {
-			t.Errorf("Expected default Host='localhost', got '%s'", cfg.Host)
+		if cfg.Host != "127.0.0.1" {
+			t.Errorf("Expected default Host='127.0.0.1', got '%s'", cfg.Host)
 		}
 		if cfg.Port != 4101 {
 			t.Errorf("Expected default Port=4101, got %d", cfg.Port)
@@ -65,9 +71,10 @@ func TestLoad(t *testing.T) {
 
 	t.Run("WithCustomOptionalVariables", func(t *testing.T) {
 		os.Clearenv()
-		os.Setenv("STRAVA_CLIENT_ID", "test_client_id")
-		os.Setenv("STRAVA_CLIENT_SECRET", "test_client_secret")
-		os.Setenv("STRAVA_VERIFY_TOKEN", "test_verify_token")
+		os.Setenv("DOMAIN", "example.com")
+		os.Setenv("STRAVA_PRIMARY_CLIENT_ID", "test_client_id")
+		os.Setenv("STRAVA_PRIMARY_CLIENT_SECRET", "test_client_secret")
+		os.Setenv("STRAVA_PRIMARY_VERIFY_TOKEN", "test_verify_token")
 		os.Setenv("INTERNAL_API_KEY", "test_api_key")
 		os.Setenv("HOST", "0.0.0.0")
 		os.Setenv("PORT", "8080")
@@ -95,45 +102,49 @@ func TestLoad(t *testing.T) {
 
 	t.Run("MissingStravaClientID", func(t *testing.T) {
 		os.Clearenv()
-		os.Setenv("STRAVA_CLIENT_SECRET", "test_client_secret")
-		os.Setenv("STRAVA_VERIFY_TOKEN", "test_verify_token")
+		os.Setenv("DOMAIN", "example.com")
+		os.Setenv("STRAVA_PRIMARY_CLIENT_SECRET", "test_client_secret")
+		os.Setenv("STRAVA_PRIMARY_VERIFY_TOKEN", "test_verify_token")
 		os.Setenv("INTERNAL_API_KEY", "test_api_key")
 
 		_, err := Load()
 		if err == nil {
-			t.Fatal("Expected error for missing STRAVA_CLIENT_ID, got nil")
+			t.Fatal("Expected error for missing STRAVA_PRIMARY_CLIENT_ID, got nil")
 		}
 	})
 
 	t.Run("MissingStravaClientSecret", func(t *testing.T) {
 		os.Clearenv()
-		os.Setenv("STRAVA_CLIENT_ID", "test_client_id")
-		os.Setenv("STRAVA_VERIFY_TOKEN", "test_verify_token")
+		os.Setenv("DOMAIN", "example.com")
+		os.Setenv("STRAVA_PRIMARY_CLIENT_ID", "test_client_id")
+		os.Setenv("STRAVA_PRIMARY_VERIFY_TOKEN", "test_verify_token")
 		os.Setenv("INTERNAL_API_KEY", "test_api_key")
 
 		_, err := Load()
 		if err == nil {
-			t.Fatal("Expected error for missing STRAVA_CLIENT_SECRET, got nil")
+			t.Fatal("Expected error for missing STRAVA_PRIMARY_CLIENT_SECRET, got nil")
 		}
 	})
 
 	t.Run("MissingStravaVerifyToken", func(t *testing.T) {
 		os.Clearenv()
-		os.Setenv("STRAVA_CLIENT_ID", "test_client_id")
-		os.Setenv("STRAVA_CLIENT_SECRET", "test_client_secret")
+		os.Setenv("DOMAIN", "example.com")
+		os.Setenv("STRAVA_PRIMARY_CLIENT_ID", "test_client_id")
+		os.Setenv("STRAVA_PRIMARY_CLIENT_SECRET", "test_client_secret")
 		os.Setenv("INTERNAL_API_KEY", "test_api_key")
 
 		_, err := Load()
 		if err == nil {
-			t.Fatal("Expected error for missing STRAVA_VERIFY_TOKEN, got nil")
+			t.Fatal("Expected error for missing STRAVA_PRIMARY_VERIFY_TOKEN, got nil")
 		}
 	})
 
 	t.Run("MissingInternalAPIKey", func(t *testing.T) {
 		os.Clearenv()
-		os.Setenv("STRAVA_CLIENT_ID", "test_client_id")
-		os.Setenv("STRAVA_CLIENT_SECRET", "test_client_secret")
-		os.Setenv("STRAVA_VERIFY_TOKEN", "test_verify_token")
+		os.Setenv("DOMAIN", "example.com")
+		os.Setenv("STRAVA_PRIMARY_CLIENT_ID", "test_client_id")
+		os.Setenv("STRAVA_PRIMARY_CLIENT_SECRET", "test_client_secret")
+		os.Setenv("STRAVA_PRIMARY_VERIFY_TOKEN", "test_verify_token")
 
 		_, err := Load()
 		if err == nil {
@@ -143,9 +154,10 @@ func TestLoad(t *testing.T) {
 
 	t.Run("InvalidPortNumber", func(t *testing.T) {
 		os.Clearenv()
-		os.Setenv("STRAVA_CLIENT_ID", "test_client_id")
-		os.Setenv("STRAVA_CLIENT_SECRET", "test_client_secret")
-		os.Setenv("STRAVA_VERIFY_TOKEN", "test_verify_token")
+		os.Setenv("DOMAIN", "example.com")
+		os.Setenv("STRAVA_PRIMARY_CLIENT_ID", "test_client_id")
+		os.Setenv("STRAVA_PRIMARY_CLIENT_SECRET", "test_client_secret")
+		os.Setenv("STRAVA_PRIMARY_VERIFY_TOKEN", "test_verify_token")
 		os.Setenv("INTERNAL_API_KEY", "test_api_key")
 		os.Setenv("PORT", "not_a_number")
 

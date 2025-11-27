@@ -23,6 +23,13 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	// Set busy timeout for better concurrency handling
+	// This allows operations to retry for up to 10 seconds when database is locked
+	if _, err := db.Exec("PRAGMA busy_timeout = 10000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to set busy_timeout: %w", err)
+	}
+
 	// Execute schema to ensure tables exist
 	if _, err := db.Exec(schemaSQL); err != nil {
 		db.Close()

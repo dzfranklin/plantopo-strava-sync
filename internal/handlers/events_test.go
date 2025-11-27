@@ -42,7 +42,7 @@ func TestHandleEvents_Success(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/events?cursor=0&limit=10", nil)
-	req.Header.Set("Authorization", "test_api_key")
+	req.Header.Set("Authorization", "Bearer test_api_key")
 	w := httptest.NewRecorder()
 
 	handler.HandleEvents(w, req)
@@ -109,7 +109,7 @@ func TestHandleEvents_WrongMethod(t *testing.T) {
 	defer db.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/events", nil)
-	req.Header.Set("Authorization", "test_api_key")
+	req.Header.Set("Authorization", "Bearer test_api_key")
 	w := httptest.NewRecorder()
 
 	handler.HandleEvents(w, req)
@@ -124,7 +124,7 @@ func TestHandleEvents_InvalidCursor(t *testing.T) {
 	defer db.Close()
 
 	req := httptest.NewRequest(http.MethodGet, "/events?cursor=invalid", nil)
-	req.Header.Set("Authorization", "test_api_key")
+	req.Header.Set("Authorization", "Bearer test_api_key")
 	w := httptest.NewRecorder()
 
 	handler.HandleEvents(w, req)
@@ -150,7 +150,7 @@ func TestHandleEvents_InvalidLimit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/events?limit="+tt.limit, nil)
-			req.Header.Set("Authorization", "test_api_key")
+			req.Header.Set("Authorization", "Bearer test_api_key")
 			w := httptest.NewRecorder()
 
 			handler.HandleEvents(w, req)
@@ -167,7 +167,7 @@ func TestHandleEvents_EmptyWithTimeout(t *testing.T) {
 	defer db.Close()
 
 	req := httptest.NewRequest(http.MethodGet, "/events?cursor=0&long_poll=true", nil)
-	req.Header.Set("Authorization", "test_api_key")
+	req.Header.Set("Authorization", "Bearer test_api_key")
 	w := httptest.NewRecorder()
 
 	start := time.Now()
@@ -213,7 +213,7 @@ func TestHandleEvents_LongPolling(t *testing.T) {
 
 	// Start request in goroutine
 	req := httptest.NewRequest(http.MethodGet, "/events?cursor=0&long_poll=true", nil)
-	req.Header.Set("Authorization", "test_api_key")
+	req.Header.Set("Authorization", "Bearer test_api_key")
 	w := httptest.NewRecorder()
 
 	done := make(chan bool)
@@ -269,7 +269,7 @@ func TestHandleEvents_LongPollDisabled(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/events?long_poll=false", nil)
-	req.Header.Set("Authorization", "test_api_key")
+	req.Header.Set("Authorization", "Bearer test_api_key")
 	w := httptest.NewRecorder()
 
 	start := time.Now()
